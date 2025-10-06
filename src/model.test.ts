@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
+import { runner } from "node-pg-migrate";
 import { FeatureFlagModel } from "./model.js";
 
 const DB_CONFIG = {
@@ -36,38 +37,16 @@ describe("FeatureFlagModel", () => {
       database: TEST_DB_NAME,
     });
 
-    // Run the migration to create the table
-    await testPool.query(`
-      CREATE TABLE flapjack_feature_flag (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        everyone BOOLEAN,
-        percent NUMERIC(3,1) CHECK (percent >= 0 AND percent <= 99.9),
-        roles TEXT[] DEFAULT '{}',
-        users TEXT[] DEFAULT '{}',
-        note TEXT,
-        created TIMESTAMPTZ NOT NULL DEFAULT now(),
-        modified TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-
-    // Create the trigger function and trigger
-    await testPool.query(`
-      CREATE OR REPLACE FUNCTION flapjack_set_modified_timestamp()
-      RETURNS trigger AS $$
-      BEGIN
-        NEW.modified = now();
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-    `);
-
-    await testPool.query(`
-      CREATE TRIGGER flapjack_feature_flag_set_modified
-      BEFORE UPDATE ON flapjack_feature_flag
-      FOR EACH ROW
-      EXECUTE FUNCTION flapjack_set_modified_timestamp();
-    `);
+    // Run the migrations to create the schema
+    await runner({
+      databaseUrl: {
+        ...DB_CONFIG,
+        database: TEST_DB_NAME,
+      },
+      dir: "./migrations",
+      direction: "up",
+      migrationsTable: "pgmigrations",
+    });
 
     model = new FeatureFlagModel(testPool);
   });
