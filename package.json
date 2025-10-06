@@ -1,15 +1,49 @@
 {
   "name": "flapjack",
-  "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "A simple feature flags library with PostgreSQL integration",
   "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build": "npx tsc",
+    "dev": "npx tsc --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "imurmurhash": "^0.1.4",
+    "node-pg-migrate": "^8.0.3",
+    "pg": "^8.12.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.37.0",
+    "@types/imurmurhash": "^0.1.4",
+    "@types/pg": "^8.11.10",
+    "dotenv": "^17.2.3",
+    "dotenv-cli": "^10.0.0",
+    "eslint": "^9.37.0",
+    "prettier": "^3.6.2",
     "typescript": "~5.9.3",
-    "vite": "^7.1.7"
-  }
+    "typescript-eslint": "^8.45.0",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "feature-flags",
+    "postgres",
+    "database",
+    "configuration"
+  ]
 }
