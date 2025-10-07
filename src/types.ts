@@ -7,7 +7,7 @@ export type FeatureFlag = {
   /** Human readable of the feature flag */
   name: string;
   /** Flip this flag on or off for everyone, overriding all other settings */
-  everyone?: boolean;
+  everyone?: boolean | null;
   /** Number between 0 and 99.9 for percentage rollout */
   percent?: number;
   /** List of roles that have this feature flag enabled */

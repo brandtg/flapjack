@@ -234,9 +234,9 @@ describe("FeatureFlagModel", () => {
 
   describe("isEnabledForUser", () => {
     it("should return false for non-existent flag", async () => {
-      const enabled = await model.isEnabledForUser({
-        flagName: "non-existent",
-        userId: "user123",
+      const enabled = await model.isActiveForUser({
+        name: "non-existent",
+        user: "user123",
       });
       expect(enabled).toBe(false);
     });
@@ -247,9 +247,9 @@ describe("FeatureFlagModel", () => {
         everyone: true,
       });
 
-      const enabled = await model.isEnabledForUser({
-        flagName: "everyone-flag",
-        userId: "user123",
+      const enabled = await model.isActiveForUser({
+        name: "everyone-flag",
+        user: "user123",
       });
       expect(enabled).toBe(true);
     });
@@ -260,19 +260,19 @@ describe("FeatureFlagModel", () => {
         roles: ["admin", "moderator"],
       });
 
-      const enabledAdmin = await model.isEnabledForUser({
-        flagName: "role-flag",
-        userId: "user123",
+      const enabledAdmin = await model.isActiveForUser({
+        name: "role-flag",
+        user: "user123",
         roles: ["admin"],
       });
-      const enabledMod = await model.isEnabledForUser({
-        flagName: "role-flag",
-        userId: "user456",
+      const enabledMod = await model.isActiveForUser({
+        name: "role-flag",
+        user: "user456",
         roles: ["user", "moderator"],
       });
-      const enabledNone = await model.isEnabledForUser({
-        flagName: "role-flag",
-        userId: "user789",
+      const enabledNone = await model.isActiveForUser({
+        name: "role-flag",
+        user: "user789",
         roles: ["user"],
       });
 
@@ -291,9 +291,9 @@ describe("FeatureFlagModel", () => {
       const results: boolean[] = [];
       for (let i = 0; i < 5; i++) {
         results.push(
-          await model.isEnabledForUser({
-            flagName: "percent-flag",
-            userId: "user123",
+          await model.isActiveForUser({
+            name: "percent-flag",
+            user: "user123",
           }),
         );
       }
@@ -306,9 +306,9 @@ describe("FeatureFlagModel", () => {
       const userResults: boolean[] = [];
       for (let i = 0; i < 20; i++) {
         userResults.push(
-          await model.isEnabledForUser({
-            flagName: "percent-flag",
-            userId: `user${i}`,
+          await model.isActiveForUser({
+            name: "percent-flag",
+            user: `user${i}`,
           }),
         );
       }
@@ -327,9 +327,9 @@ describe("FeatureFlagModel", () => {
         percent: 0,
       });
 
-      const enabled = await model.isEnabledForUser({
-        flagName: "restricted-flag",
-        userId: "user123",
+      const enabled = await model.isActiveForUser({
+        name: "restricted-flag",
+        user: "user123",
         roles: ["user"],
       });
       expect(enabled).toBe(false);
@@ -341,19 +341,19 @@ describe("FeatureFlagModel", () => {
         groups: ["beta-users", "vip-customers"],
       });
 
-      const enabledBetaUser = await model.isEnabledForUser({
-        flagName: "group-flag",
-        userId: "user123",
+      const enabledBetaUser = await model.isActiveForUser({
+        name: "group-flag",
+        user: "user123",
         groups: ["beta-users"],
       });
-      const enabledVipUser = await model.isEnabledForUser({
-        flagName: "group-flag",
-        userId: "user456",
+      const enabledVipUser = await model.isActiveForUser({
+        name: "group-flag",
+        user: "user456",
         groups: ["regular-users", "vip-customers"],
       });
-      const enabledNone = await model.isEnabledForUser({
-        flagName: "group-flag",
-        userId: "user789",
+      const enabledNone = await model.isActiveForUser({
+        name: "group-flag",
+        user: "user789",
         groups: ["regular-users"],
       });
 
@@ -368,14 +368,14 @@ describe("FeatureFlagModel", () => {
         groups: ["admin-group"],
       });
 
-      const enabledNoGroups = await model.isEnabledForUser({
-        flagName: "group-required-flag",
-        userId: "user123",
+      const enabledNoGroups = await model.isActiveForUser({
+        name: "group-required-flag",
+        user: "user123",
         groups: [],
       });
-      const enabledUndefinedGroups = await model.isEnabledForUser({
-        flagName: "group-required-flag",
-        userId: "user456",
+      const enabledUndefinedGroups = await model.isActiveForUser({
+        name: "group-required-flag",
+        user: "user456",
       });
 
       expect(enabledNoGroups).toBe(false);
@@ -388,9 +388,9 @@ describe("FeatureFlagModel", () => {
         groups: [],
       });
 
-      const enabledWithGroups = await model.isEnabledForUser({
-        flagName: "empty-groups-flag",
-        userId: "user123",
+      const enabledWithGroups = await model.isActiveForUser({
+        name: "empty-groups-flag",
+        user: "user123",
         groups: ["some-group"],
       });
 
@@ -404,23 +404,23 @@ describe("FeatureFlagModel", () => {
         roles: ["admin"],
       });
 
-      const enabledByGroup = await model.isEnabledForUser({
-        flagName: "context-flag",
-        userId: "user123",
+      const enabledByGroup = await model.isActiveForUser({
+        name: "context-flag",
+        user: "user123",
         groups: ["beta-testers"],
         roles: ["user"],
       });
 
-      const enabledByRole = await model.isEnabledForUser({
-        flagName: "context-flag",
-        userId: "user456",
+      const enabledByRole = await model.isActiveForUser({
+        name: "context-flag",
+        user: "user456",
         groups: ["regular"],
         roles: ["admin"],
       });
 
-      const notEnabled = await model.isEnabledForUser({
-        flagName: "context-flag",
-        userId: "user789",
+      const notEnabled = await model.isActiveForUser({
+        name: "context-flag",
+        user: "user789",
         groups: ["regular"],
         roles: ["user"],
       });
@@ -440,9 +440,9 @@ describe("FeatureFlagModel", () => {
         percent: 99.9,
       });
 
-      const result = await model.isEnabledForUser({
-        flagName: "priority-test-flag",
-        userId: "user123",
+      const result = await model.isActiveForUser({
+        name: "priority-test-flag",
+        user: "user123",
         groups: ["beta-users"],
         roles: ["admin"],
       });
@@ -458,26 +458,26 @@ describe("FeatureFlagModel", () => {
         users: ["special-user"],
       });
 
-      const enabledByGroup = await model.isEnabledForUser({
-        flagName: "combined-flag",
-        userId: "user1",
+      const enabledByGroup = await model.isActiveForUser({
+        name: "combined-flag",
+        user: "user1",
         groups: ["beta-users"],
       });
 
-      const enabledByRole = await model.isEnabledForUser({
-        flagName: "combined-flag",
-        userId: "user2",
+      const enabledByRole = await model.isActiveForUser({
+        name: "combined-flag",
+        user: "user2",
         roles: ["moderator"],
       });
 
-      const enabledByUserId = await model.isEnabledForUser({
-        flagName: "combined-flag",
-        userId: "special-user",
+      const enabledByUserId = await model.isActiveForUser({
+        name: "combined-flag",
+        user: "special-user",
       });
 
-      const notEnabled = await model.isEnabledForUser({
-        flagName: "combined-flag",
-        userId: "user3",
+      const notEnabled = await model.isActiveForUser({
+        name: "combined-flag",
+        user: "user3",
         groups: ["regular"],
         roles: ["user"],
       });
@@ -494,15 +494,15 @@ describe("FeatureFlagModel", () => {
         groups: ["Beta-Users"],
       });
 
-      const enabledCorrectCase = await model.isEnabledForUser({
-        flagName: "case-sensitive-flag",
-        userId: "user123",
+      const enabledCorrectCase = await model.isActiveForUser({
+        name: "case-sensitive-flag",
+        user: "user123",
         groups: ["Beta-Users"],
       });
 
-      const enabledWrongCase = await model.isEnabledForUser({
-        flagName: "case-sensitive-flag",
-        userId: "user456",
+      const enabledWrongCase = await model.isActiveForUser({
+        name: "case-sensitive-flag",
+        user: "user456",
         groups: ["beta-users"],
       });
 
@@ -518,9 +518,9 @@ describe("FeatureFlagModel", () => {
       });
 
       // User should be enabled even if they're not in the group
-      const enabledUser = await model.isEnabledForUser({
-        flagName: "user-priority-flag",
-        userId: "special-user",
+      const enabledUser = await model.isActiveForUser({
+        name: "user-priority-flag",
+        user: "special-user",
         groups: ["different-group"],
       });
 
@@ -535,14 +535,62 @@ describe("FeatureFlagModel", () => {
       });
 
       // User with group but no role should be enabled
-      const enabledByGroup = await model.isEnabledForUser({
-        flagName: "group-priority-flag",
-        userId: "user123",
+      const enabledByGroup = await model.isActiveForUser({
+        name: "group-priority-flag",
+        user: "user123",
         groups: ["beta-users"],
         roles: ["user"], // Not admin
       });
 
       expect(enabledByGroup).toBe(true);
+    });
+
+    it("should revert to other rules when everyone changes from true to null", async () => {
+      // Create a flag with everyone: true
+      await model.create({
+        name: "everyone-revert-flag",
+        everyone: true,
+        roles: ["admin"],
+        groups: ["beta-users"],
+      });
+
+      // Should be enabled for any user
+      const enabledAny = await model.isActiveForUser({
+        name: "everyone-revert-flag",
+        user: "user123",
+        roles: ["user"],
+        groups: ["regular"],
+      });
+      expect(enabledAny).toBe(true);
+
+      // Update everyone to null (should remove the override)
+      const flag = await model.getByName("everyone-revert-flag");
+      await model.update(flag!.id, { everyone: null });
+
+      // Now, only users matching roles or groups should be enabled
+      const enabledByRole = await model.isActiveForUser({
+        name: "everyone-revert-flag",
+        user: "user456",
+        roles: ["admin"],
+        groups: ["regular"],
+      });
+      expect(enabledByRole).toBe(true);
+
+      const enabledByGroup = await model.isActiveForUser({
+        name: "everyone-revert-flag",
+        user: "user789",
+        roles: ["user"],
+        groups: ["beta-users"],
+      });
+      expect(enabledByGroup).toBe(true);
+
+      const notEnabled = await model.isActiveForUser({
+        name: "everyone-revert-flag",
+        user: "user000",
+        roles: ["user"],
+        groups: ["regular"],
+      });
+      expect(notEnabled).toBe(false);
     });
   });
 });

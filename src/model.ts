@@ -178,18 +178,18 @@ export class FeatureFlagModel {
     return MurmurHash3(userId).result();
   }
 
-  async isEnabledForUser({
-    flagName,
-    userId,
+  async isActiveForUser({
+    name,
+    user,
     roles,
     groups,
   }: {
-    flagName: string;
-    userId?: string;
+    name: string;
+    user?: string;
     roles?: string[];
     groups?: string[];
   }): Promise<boolean> {
-    const flag = await this.getByName(flagName);
+    const flag = await this.getByName(name);
 
     // No such flag
     if (!flag) {
@@ -202,7 +202,7 @@ export class FeatureFlagModel {
     }
 
     // User-Specific Check: If user ID is in the users array, return true
-    if (userId && flag.users && flag.users.includes(userId)) {
+    if (user && flag.users && flag.users.includes(user)) {
       return true;
     }
 
@@ -221,8 +221,8 @@ export class FeatureFlagModel {
     }
 
     // Percentage Check: If percentage rollout applies to this user, return rollout result
-    if (userId && flag.percent && flag.percent > 0) {
-      const userHash = await this.hashUserId(userId);
+    if (user && flag.percent && flag.percent > 0) {
+      const userHash = await this.hashUserId(user);
       const bucket = userHash % 100;
       if (bucket < flag.percent) {
         return true;
