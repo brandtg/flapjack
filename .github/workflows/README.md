@@ -29,30 +29,6 @@ Runs on every pull request and push to main branch.
 - PostgreSQL service container (automatically provisioned)
 - No external secrets required
 
-### `release.yml` - NPM Publishing
-
-Runs automatically when a new GitHub release is published.
-
-**Jobs:**
-
-1. **Publish to NPM**
-   - Runs all prepublishOnly checks (lint, test, build)
-   - Publishes to NPM with provenance
-   - Uses scoped package access (public)
-
-**Requirements:**
-
-- `NPM_TOKEN` secret must be configured in repository settings
-  - Go to Settings → Secrets and variables → Actions
-  - Create new repository secret named `NPM_TOKEN`
-  - Value should be your NPM access token with publish permissions
-
-**Usage:**
-
-1. Update version in `package.json`
-2. Create a new GitHub release with a tag (e.g., `v0.1.1`)
-3. Workflow automatically publishes to NPM
-
 ### `dependabot.yml` - Dependency Updates
 
 Automatically creates pull requests for dependency updates.
@@ -115,14 +91,13 @@ The CI uses a PostgreSQL service container with these credentials:
 
 If tests fail, check that `DATABASE_URL` environment variable is set correctly in the workflow.
 
-### NPM Publish Failing
+### Publishing to NPM
 
-Common issues:
+Publishing is done manually to support 2FA authentication. See the main README.md for detailed publishing instructions including:
 
-1. **Missing NPM_TOKEN**: Add token to repository secrets
-2. **Version already exists**: Bump version in `package.json`
-3. **Scope access**: Ensure you have access to `@brandtg` scope on NPM
-4. **Two-factor auth**: Use an automation token, not a user token
+- Logging in with `npm login`
+- Version management with `npm version`
+- Publishing with `npm publish --access public`
 
 ### Prettier Failures
 

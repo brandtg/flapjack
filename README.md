@@ -500,28 +500,78 @@ npm install /path/to/flapjack-0.1.0.tgz
 
 Before publishing to npm, make sure your package is ready:
 
-1. **Prepare for publishing** (runs linting, tests, and build):
+1. **Login to npm** (one-time setup):
+
+   ```bash
+   npm login
+   ```
+
+   This will prompt for your username, password, email, and 2FA code.
+
+2. **Verify your login**:
+
+   ```bash
+   npm whoami
+   ```
+
+3. **Update the version** in `package.json`:
+
+   ```bash
+   # For a patch release (0.1.0 -> 0.1.1)
+   npm version patch
+
+   # For a minor release (0.1.0 -> 0.2.0)
+   npm version minor
+
+   # For a major release (0.1.0 -> 1.0.0)
+   npm version major
+   ```
+
+   This automatically creates a git commit and tag.
+
+4. **Run pre-publish checks** (linting, tests, and build):
 
    ```bash
    npm run prepublishOnly
    ```
 
-2. **Publish to npm**:
+5. **Publish to npm**:
 
    ```bash
-   npm publish --public
+   npm publish --access public
    ```
 
-   For a dry run to see what would be published:
+   You'll be prompted for your 2FA code. For a dry run to see what would be published:
 
    ```bash
-   npm publish --public --dry-run
+   npm publish --access public --dry-run
    ```
 
-3. **Publishing a beta version**:
+6. **Push the version tag to GitHub**:
+
    ```bash
-   npm publish --tag beta
+   git push && git push --tags
    ```
+
+7. **Optional: Create a GitHub release** for the new version at https://github.com/brandtg/flapjack/releases/new
+
+#### Publishing a Beta Version
+
+For pre-release versions:
+
+```bash
+# Update to a pre-release version
+npm version prerelease --preid=beta
+
+# Publish with beta tag
+npm publish --access public --tag beta
+```
+
+Users can install beta versions with:
+
+```bash
+npm install @brandtg/flapjack@beta
+```
 
 ## Contributing
 
