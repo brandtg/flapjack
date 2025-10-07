@@ -1,5 +1,9 @@
 # Flapjack
 
+[![CI](https://github.com/brandtg/flapjack/actions/workflows/ci.yml/badge.svg)](https://github.com/brandtg/flapjack/actions/workflows/ci.yml)
+[![npm version](https://badge.fury.io/js/@brandtg%2Fflapjack.svg)](https://www.npmjs.com/package/@brandtg/flapjack)
+[![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
+
 A simple feature flags library with PostgreSQL integration, inspired by [django-waffle](https://github.com/django-waffle/django-waffle).
 
 ## Features
@@ -316,12 +320,12 @@ Use descriptive names that include context:
 
 ```typescript
 // Good: Includes feature, date, and owner
-"enable_new_checkout_20250101_gbrandt"
-"experiment_ai_suggestions_20250115_team_growth"
+"enable_new_checkout_20250101_gbrandt";
+"experiment_ai_suggestions_20250115_team_growth";
 
 // Avoid: Too generic
-"new_feature"
-"test_flag"
+"new_feature";
+"test_flag";
 ```
 
 ### Gradual Rollouts
