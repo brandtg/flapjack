@@ -1,0 +1,78 @@
+# Source files (only ship compiled dist/)
+src/
+
+# Tests
+*.test.ts
+*.test.js
+*.test.d.ts
+*.test.d.ts.map
+
+# Development files
+.env
+.env.*
+!.env.example
+env
+
+# Build artifacts and caches
+node_modules/
+coverage/
+.nyc_output/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+circle.yml
+
+# Documentation source (keep compiled README.md)
+docs/
+
+# Development scripts
+bin/dev/
+
+# Docker files
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Linting and formatting configs
+.eslintrc*
+.prettierrc*
+.editorconfig
+eslint.config.mjs
+tsconfig.lint.json
+
+# TypeScript configs (keep only what's needed)
+tsconfig.json
+
+# Package manager files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Testing configs
+vitest.config.*
+jest.config.*
+.mocharc.*
+
+# Misc
+*.tgz
+.npmrc

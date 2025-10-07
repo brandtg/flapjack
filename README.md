@@ -505,13 +505,13 @@ Before publishing to npm, make sure your package is ready:
 2. **Publish to npm**:
 
    ```bash
-   npm publish
+   npm publish --public
    ```
 
    For a dry run to see what would be published:
 
    ```bash
-   npm publish --dry-run
+   npm publish --public --dry-run
    ```
 
 3. **Publishing a beta version**:
