@@ -17,7 +17,10 @@
   },
   "files": [
     "dist",
-    "migrations"
+    "migrations",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.d.ts.map"
   ],
   "scripts": {
     "build": "npm run clean && npx tsc",
@@ -32,7 +35,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "prepublish-only": "npm run lint && npm run test && npm run build",
+    "prepublishOnly": "npm run lint && npm run test && npm run build",
     "pack:dev": "npm run build && npm pack",
     "smoke": "npm run build && node dist/cli.js --help && node dist/cli.js hash-user smoke"
   },
@@ -69,7 +72,7 @@
     "url": "https://github.com/brandtg/flapjack/issues"
   },
   "homepage": "https://github.com/brandtg/flapjack#readme",
-  "license": "MIT",
+  "license": "BSD-3-Clause",
   "author": "Greg Brandt",
   "engines": {
     "node": ">=18.0.0"
