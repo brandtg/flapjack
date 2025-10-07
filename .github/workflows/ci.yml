@@ -64,8 +64,6 @@ jobs:
 
       - name: Run smoke test
         run: npm run smoke
-        env:
-          DATABASE_URL: postgresql://flapjack:flapjack@localhost:5432/flapjack
 
   package-check:
     name: Package Validation
