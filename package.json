@@ -1,5 +1,5 @@
 {
-  "name": "flapjack",
+  "name": "@brandtg/flapjack",
   "version": "0.1.0",
   "description": "A simple feature flags library with PostgreSQL integration",
   "type": "module",
@@ -17,12 +17,20 @@
     "migrations"
   ],
   "scripts": {
-    "build": "npx tsc",
+    "build": "npm run clean && npx tsc",
+    "clean": "rm -rf dist",
     "dev": "npx tsc --watch",
+    "dev:env": "bash bin/dev/env.sh",
+    "dev:migrate": "npx dotenv-cli -e env -- node-pg-migrate up",
+    "dev:docker:up": "docker compose -f docker-compose.yml up -d",
+    "dev:docker:down": "docker compose -f docker-compose.yml down -v",
+    "create-migration": "npx node-pg-migrate create --",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "prepublish-only": "npm run lint && npm run test && npm run build",
+    "pack:dev": "npm run build && npm pack"
   },
   "dependencies": {
     "imurmurhash": "^0.1.4",
@@ -46,5 +54,18 @@
     "postgres",
     "database",
     "configuration"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brandtg/flapjack.git"
+  },
+  "bugs": {
+    "url": "https://github.com/brandtg/flapjack/issues"
+  },
+  "homepage": "https://github.com/brandtg/flapjack#readme",
+  "license": "MIT",
+  "author": "Greg Brandt",
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
