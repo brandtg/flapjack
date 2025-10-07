@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
-import { runner } from "node-pg-migrate";
+import { runner as migrate } from "node-pg-migrate";
 import { FeatureFlagModel } from "./model.js";
 
 const DB_CONFIG = {
@@ -38,7 +38,7 @@ describe("FeatureFlagModel", () => {
     });
 
     // Run the migrations to create the schema
-    await runner({
+    await migrate({
       databaseUrl: {
         ...DB_CONFIG,
         database: TEST_DB_NAME,
@@ -88,6 +88,8 @@ describe("FeatureFlagModel", () => {
         everyone: true,
         percent: 25.5,
         roles: ["admin", "moderator"],
+        groups: ["beta-users", "vip-customers"],
+        users: ["user123", "user456"],
         note: "Test feature flag with all properties",
       };
       const flag = await model.create(input);
@@ -97,6 +99,8 @@ describe("FeatureFlagModel", () => {
       expect(flag.everyone).toBe(true);
       expect(flag.percent).toBe(25.5);
       expect(flag.roles).toEqual(["admin", "moderator"]);
+      expect(flag.groups).toEqual(["beta-users", "vip-customers"]);
+      expect(flag.users).toEqual(["user123", "user456"]);
       expect(flag.note).toBe("Test feature flag with all properties");
       expect(flag.created).toBeInstanceOf(Date);
       expect(flag.modified).toBeInstanceOf(Date);
@@ -235,7 +239,10 @@ describe("FeatureFlagModel", () => {
 
   describe("isEnabledForUser", () => {
     it("should return false for non-existent flag", async () => {
-      const enabled = await model.isEnabledForUser("non-existent", "user123");
+      const enabled = await model.isEnabledForUser({
+        flagName: "non-existent",
+        userId: "user123",
+      });
       expect(enabled).toBe(false);
     });
 
@@ -245,7 +252,10 @@ describe("FeatureFlagModel", () => {
         everyone: true,
       });
 
-      const enabled = await model.isEnabledForUser("everyone-flag", "user123");
+      const enabled = await model.isEnabledForUser({
+        flagName: "everyone-flag",
+        userId: "user123",
+      });
       expect(enabled).toBe(true);
     });
 
@@ -255,18 +265,21 @@ describe("FeatureFlagModel", () => {
         roles: ["admin", "moderator"],
       });
 
-      const enabledAdmin = await model.isEnabledForUser(
-        "role-flag",
-        "user123",
-        ["admin"],
-      );
-      const enabledMod = await model.isEnabledForUser("role-flag", "user456", [
-        "user",
-        "moderator",
-      ]);
-      const enabledNone = await model.isEnabledForUser("role-flag", "user789", [
-        "user",
-      ]);
+      const enabledAdmin = await model.isEnabledForUser({
+        flagName: "role-flag",
+        userId: "user123",
+        roles: ["admin"],
+      });
+      const enabledMod = await model.isEnabledForUser({
+        flagName: "role-flag",
+        userId: "user456",
+        roles: ["user", "moderator"],
+      });
+      const enabledNone = await model.isEnabledForUser({
+        flagName: "role-flag",
+        userId: "user789",
+        roles: ["user"],
+      });
 
       expect(enabledAdmin).toBe(true);
       expect(enabledMod).toBe(true);
@@ -280,9 +293,14 @@ describe("FeatureFlagModel", () => {
       });
 
       // Test the same user multiple times - should be consistent
-      const results = [];
+      const results: boolean[] = [];
       for (let i = 0; i < 5; i++) {
-        results.push(await model.isEnabledForUser("percent-flag", "user123"));
+        results.push(
+          await model.isEnabledForUser({
+            flagName: "percent-flag",
+            userId: "user123",
+          }),
+        );
       }
 
       // All results should be the same (deterministic)
@@ -290,10 +308,13 @@ describe("FeatureFlagModel", () => {
       expect(results.every((r) => r === firstResult)).toBe(true);
 
       // Test multiple different users to ensure some variance
-      const userResults = [];
+      const userResults: boolean[] = [];
       for (let i = 0; i < 20; i++) {
         userResults.push(
-          await model.isEnabledForUser("percent-flag", `user${i}`),
+          await model.isEnabledForUser({
+            flagName: "percent-flag",
+            userId: `user${i}`,
+          }),
         );
       }
 
@@ -311,27 +332,222 @@ describe("FeatureFlagModel", () => {
         percent: 0,
       });
 
-      const enabled = await model.isEnabledForUser(
-        "restricted-flag",
-        "user123",
-        ["user"],
-      );
+      const enabled = await model.isEnabledForUser({
+        flagName: "restricted-flag",
+        userId: "user123",
+        roles: ["user"],
+      });
       expect(enabled).toBe(false);
     });
 
-    it("should prioritize everyone flag over other settings", async () => {
+    it("should return true for users with matching groups", async () => {
       await model.create({
-        name: "everyone-override-flag",
-        everyone: true,
-        percent: 0, // This should be ignored
-        roles: [], // This should be ignored
+        name: "group-flag",
+        groups: ["beta-users", "vip-customers"],
       });
 
-      const enabled = await model.isEnabledForUser(
-        "everyone-override-flag",
-        "user123",
-      );
-      expect(enabled).toBe(true);
+      const enabledBetaUser = await model.isEnabledForUser({
+        flagName: "group-flag",
+        userId: "user123",
+        groups: ["beta-users"],
+      });
+      const enabledVipUser = await model.isEnabledForUser({
+        flagName: "group-flag",
+        userId: "user456",
+        groups: ["regular-users", "vip-customers"],
+      });
+      const enabledNone = await model.isEnabledForUser({
+        flagName: "group-flag",
+        userId: "user789",
+        groups: ["regular-users"],
+      });
+
+      expect(enabledBetaUser).toBe(true);
+      expect(enabledVipUser).toBe(true);
+      expect(enabledNone).toBe(false);
+    });
+
+    it("should handle users with no groups vs flags with groups", async () => {
+      await model.create({
+        name: "group-required-flag",
+        groups: ["admin-group"],
+      });
+
+      const enabledNoGroups = await model.isEnabledForUser({
+        flagName: "group-required-flag",
+        userId: "user123",
+        groups: [],
+      });
+      const enabledUndefinedGroups = await model.isEnabledForUser({
+        flagName: "group-required-flag",
+        userId: "user456",
+      });
+
+      expect(enabledNoGroups).toBe(false);
+      expect(enabledUndefinedGroups).toBe(false);
+    });
+
+    it("should handle empty groups array like no groups", async () => {
+      await model.create({
+        name: "empty-groups-flag",
+        groups: [],
+      });
+
+      const enabledWithGroups = await model.isEnabledForUser({
+        flagName: "empty-groups-flag",
+        userId: "user123",
+        groups: ["some-group"],
+      });
+
+      expect(enabledWithGroups).toBe(false);
+    });
+
+    it("should work with roles and groups", async () => {
+      await model.create({
+        name: "context-flag",
+        groups: ["beta-testers"],
+        roles: ["admin"],
+      });
+
+      const enabledByGroup = await model.isEnabledForUser({
+        flagName: "context-flag",
+        userId: "user123",
+        groups: ["beta-testers"],
+        roles: ["user"],
+      });
+
+      const enabledByRole = await model.isEnabledForUser({
+        flagName: "context-flag",
+        userId: "user456",
+        groups: ["regular"],
+        roles: ["admin"],
+      });
+
+      const notEnabled = await model.isEnabledForUser({
+        flagName: "context-flag",
+        userId: "user789",
+        groups: ["regular"],
+        roles: ["user"],
+      });
+
+      expect(enabledByGroup).toBe(true);
+      expect(enabledByRole).toBe(true);
+      expect(notEnabled).toBe(false);
+    });
+
+    it("should prioritize evaluation order correctly with groups", async () => {
+      // Test that everyone override still takes precedence over groups
+      await model.create({
+        name: "priority-test-flag",
+        everyone: false,
+        groups: ["beta-users"],
+        roles: ["admin"],
+        percent: 99.9,
+      });
+
+      const result = await model.isEnabledForUser({
+        flagName: "priority-test-flag",
+        userId: "user123",
+        groups: ["beta-users"],
+        roles: ["admin"],
+      });
+
+      expect(result).toBe(false); // everyone: false should override everything
+    });
+
+    it("should support groups alongside other settings", async () => {
+      await model.create({
+        name: "combined-flag",
+        groups: ["beta-users"],
+        roles: ["moderator"],
+        users: ["special-user"],
+      });
+
+      const enabledByGroup = await model.isEnabledForUser({
+        flagName: "combined-flag",
+        userId: "user1",
+        groups: ["beta-users"],
+      });
+
+      const enabledByRole = await model.isEnabledForUser({
+        flagName: "combined-flag",
+        userId: "user2",
+        roles: ["moderator"],
+      });
+
+      const enabledByUserId = await model.isEnabledForUser({
+        flagName: "combined-flag",
+        userId: "special-user",
+      });
+
+      const notEnabled = await model.isEnabledForUser({
+        flagName: "combined-flag",
+        userId: "user3",
+        groups: ["regular"],
+        roles: ["user"],
+      });
+
+      expect(enabledByGroup).toBe(true);
+      expect(enabledByRole).toBe(true);
+      expect(enabledByUserId).toBe(true);
+      expect(notEnabled).toBe(false);
+    });
+
+    it("should handle case sensitivity in group names", async () => {
+      await model.create({
+        name: "case-sensitive-flag",
+        groups: ["Beta-Users"],
+      });
+
+      const enabledCorrectCase = await model.isEnabledForUser({
+        flagName: "case-sensitive-flag",
+        userId: "user123",
+        groups: ["Beta-Users"],
+      });
+
+      const enabledWrongCase = await model.isEnabledForUser({
+        flagName: "case-sensitive-flag",
+        userId: "user456",
+        groups: ["beta-users"],
+      });
+
+      expect(enabledCorrectCase).toBe(true);
+      expect(enabledWrongCase).toBe(false);
+    });
+
+    it("should prioritize users over groups in evaluation", async () => {
+      await model.create({
+        name: "user-priority-flag",
+        groups: ["restricted-group"],
+        users: ["special-user"],
+      });
+
+      // User should be enabled even if they're not in the group
+      const enabledUser = await model.isEnabledForUser({
+        flagName: "user-priority-flag",
+        userId: "special-user",
+        groups: ["different-group"],
+      });
+
+      expect(enabledUser).toBe(true);
+    });
+
+    it("should prioritize groups over roles in evaluation", async () => {
+      await model.create({
+        name: "group-priority-flag",
+        groups: ["beta-users"],
+        roles: ["admin"],
+      });
+
+      // User with group but no role should be enabled
+      const enabledByGroup = await model.isEnabledForUser({
+        flagName: "group-priority-flag",
+        userId: "user123",
+        groups: ["beta-users"],
+        roles: ["user"], // Not admin
+      });
+
+      expect(enabledByGroup).toBe(true);
     });
   });
 });

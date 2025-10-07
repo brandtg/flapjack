@@ -12,6 +12,8 @@ export type FeatureFlag = {
   percent?: number;
   /** List of roles that have this feature flag enabled */
   roles?: string[];
+  /** List of user groups that have this feature flag enabled */
+  groups?: string[];
   /** List of specific user IDs that have this feature flag enabled */
   users?: string[];
   /** Description of where this flag is used and what it does */

@@ -1,4 +1,4 @@
-import type { FeatureFlag } from "./types";
+import type { FeatureFlag } from "./types.js";
 import type { QueryResult } from "pg";
 import MurmurHash3 from "imurmurhash";
 
@@ -15,6 +15,8 @@ const COLUMNS = [
   "everyone",
   "percent",
   "roles",
+  "groups",
+  "users",
   "note",
   "created",
   "modified",
@@ -34,6 +36,10 @@ function mapRow(row: any): FeatureFlag {
         : Number(row.percent),
     roles:
       row.roles && row.roles.length > 0 ? (row.roles as string[]) : undefined,
+    groups:
+      row.groups && row.groups.length > 0
+        ? (row.groups as string[])
+        : undefined,
     users:
       row.users && row.users.length > 0 ? (row.users as string[]) : undefined,
     note: row.note ?? undefined,
@@ -64,6 +70,14 @@ export class FeatureFlagModel {
     if ("roles" in input) {
       cols.push("roles");
       vals.push(input.roles ?? null);
+    }
+    if ("groups" in input) {
+      cols.push("groups");
+      vals.push(input.groups ?? null);
+    }
+    if ("users" in input) {
+      cols.push("users");
+      vals.push(input.users ?? null);
     }
     if ("note" in input) {
       cols.push("note");
@@ -119,6 +133,14 @@ export class FeatureFlagModel {
       sets.push(`roles = $${sets.length + 1}`);
       vals.push(changes.roles ?? null);
     }
+    if ("groups" in changes) {
+      sets.push(`groups = $${sets.length + 1}`);
+      vals.push(changes.groups ?? null);
+    }
+    if ("users" in changes) {
+      sets.push(`users = $${sets.length + 1}`);
+      vals.push(changes.users ?? null);
+    }
     if ("note" in changes) {
       sets.push(`note = $${sets.length + 1}`);
       vals.push(changes.note ?? null);
@@ -141,15 +163,32 @@ export class FeatureFlagModel {
     return (res as any).rowCount > 0;
   }
 
+  /**
+   * Checks if a user belongs to any of the specified groups
+   */
+  private isActiveForGroups(
+    userGroups: string[] = [],
+    flagGroups: string[] = [],
+  ): boolean {
+    if (flagGroups.length === 0) return false;
+    return flagGroups.some((group) => userGroups.includes(group));
+  }
+
   async hashUserId(userId: string): Promise<number> {
     return MurmurHash3(userId).result();
   }
 
-  async isEnabledForUser(
-    flagName: string,
-    userId: string,
-    userRoles?: string[],
-  ): Promise<boolean> {
+  async isEnabledForUser({
+    flagName,
+    userId,
+    roles,
+    groups,
+  }: {
+    flagName: string;
+    userId?: string;
+    roles?: string[];
+    groups?: string[];
+  }): Promise<boolean> {
     const flag = await this.getByName(flagName);
 
     // No such flag
@@ -157,27 +196,32 @@ export class FeatureFlagModel {
       return false;
     }
 
-    // Enabled for everyone
-    if (flag.everyone) {
+    // Everyone Override: If everyone is true or false, return that value immediately
+    if (flag.everyone !== undefined) {
+      return flag.everyone;
+    }
+
+    // User-Specific Check: If user ID is in the users array, return true
+    if (userId && flag.users && flag.users.includes(userId)) {
       return true;
     }
 
-    // Enabled for this specific user
-    if (flag.users && flag.users.includes(userId)) {
+    // Group Check: If any of the user's groups match any group in the groups array, return true
+    if (groups && this.isActiveForGroups(groups, flag.groups)) {
       return true;
     }
 
-    // Enabled for a role that this user has
-    if (flag.roles && userRoles) {
-      for (const role of userRoles) {
+    // Role Check: If any of the user's roles match any role in the roles array, return true
+    if (flag.roles && roles) {
+      for (const role of roles) {
         if (flag.roles.includes(role)) {
           return true;
         }
       }
     }
 
-    // Check percentage rollout
-    if (flag.percent && flag.percent > 0) {
+    // Percentage Check: If percentage rollout applies to this user, return rollout result
+    if (userId && flag.percent && flag.percent > 0) {
       const userHash = await this.hashUserId(userId);
       const bucket = userHash % 100;
       if (bucket < flag.percent) {
@@ -185,7 +229,7 @@ export class FeatureFlagModel {
       }
     }
 
-    // Not enabled for this user
+    // Default: Return false
     return false;
   }
 }

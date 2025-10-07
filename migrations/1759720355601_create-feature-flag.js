@@ -19,6 +19,7 @@ export const up = (pgm) => {
       check: "percent >= 0 AND percent <= 99.9",
     },
     roles: { type: "text[]", default: pgm.func("'{}'::text[]") },
+    groups: { type: "text[]", default: pgm.func("'{}'::text[]") },
     users: { type: "text[]", default: pgm.func("'{}'::text[]") },
     note: { type: "text" },
     created: { type: "timestamptz", notNull: true, default: pgm.func("now()") },
