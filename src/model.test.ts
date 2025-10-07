@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
-import { runner as migrate } from "node-pg-migrate";
 import { FeatureFlagModel } from "./model.js";
+import { runMigrations } from "./migrate.js";
 
 const DB_CONFIG = {
   user: "flapjack",
@@ -38,13 +38,8 @@ describe("FeatureFlagModel", () => {
     });
 
     // Run the migrations to create the schema
-    await migrate({
-      databaseUrl: {
-        ...DB_CONFIG,
-        database: TEST_DB_NAME,
-      },
-      dir: "./migrations",
-      direction: "up",
+    await runMigrations({
+      databaseUrl: `postgres://${DB_CONFIG.user}:${DB_CONFIG.password}@${DB_CONFIG.host}:${DB_CONFIG.port}/${TEST_DB_NAME}`,
       migrationsTable: "pgmigrations",
     });
 
