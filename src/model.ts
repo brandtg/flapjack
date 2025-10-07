@@ -48,13 +48,60 @@ function mapRow(row: any): FeatureFlag {
   };
 }
 
+/**
+ * Model for managing feature flags stored in PostgreSQL.
+ * 
+ * @example
+ * ```typescript
+ * import { Pool } from "pg";
+ * import { FeatureFlagModel } from "@brandtg/flapjack";
+ * 
+ * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+ * const featureFlags = new FeatureFlagModel(pool);
+ * ```
+ */
 export class FeatureFlagModel {
   private db: Queryable;
 
+  /**
+   * Creates a new FeatureFlagModel instance.
+   * 
+   * @param db - A PostgreSQL Pool or Client instance that implements the Queryable interface
+   * 
+   * @example
+   * ```typescript
+   * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+   * const model = new FeatureFlagModel(pool);
+   * ```
+   */
   constructor(db: Queryable) {
     this.db = db;
   }
 
+  /**
+   * Creates a new feature flag in the database.
+   * 
+   * @param input - Feature flag configuration
+   * @param input.name - Unique name for the feature flag (required)
+   * @param input.everyone - Optional boolean to enable/disable for everyone (overrides all other settings)
+   * @param input.percent - Optional percentage rollout (0-99.9)
+   * @param input.roles - Optional list of roles that have this flag enabled
+   * @param input.groups - Optional list of user groups that have this flag enabled
+   * @param input.users - Optional list of specific user IDs that have this flag enabled
+   * @param input.note - Optional description of the flag's purpose
+   * @returns The created feature flag with generated id, created, and modified timestamps
+   * 
+   * @throws Will throw an error if a flag with the same name already exists
+   * 
+   * @example
+   * ```typescript
+   * const flag = await model.create({
+   *   name: "new_checkout_flow",
+   *   roles: ["admin"],
+   *   note: "New checkout redesign",
+   * });
+   * ```
+   */
   async create(input: CreateInput): Promise<FeatureFlag> {
     const cols: string[] = ["name"];
     const vals: any[] = [input.name];
@@ -90,6 +137,20 @@ export class FeatureFlagModel {
     return mapRow(res.rows[0]);
   }
 
+  /**
+   * Retrieves a feature flag by its ID.
+   * 
+   * @param id - The unique identifier of the feature flag
+   * @returns The feature flag if found, null otherwise
+   * 
+   * @example
+   * ```typescript
+   * const flag = await model.getById(123);
+   * if (flag) {
+   *   console.log(`Flag ${flag.name} is configured`);
+   * }
+   * ```
+   */
   async getById(id: number): Promise<FeatureFlag | null> {
     const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE id = $1`;
     const res = await this.db.query(sql, [id]);
@@ -97,6 +158,20 @@ export class FeatureFlagModel {
     return mapRow(res.rows[0]);
   }
 
+  /**
+   * Retrieves a feature flag by its name.
+   * 
+   * @param name - The unique name of the feature flag
+   * @returns The feature flag if found, null otherwise
+   * 
+   * @example
+   * ```typescript
+   * const flag = await model.getByName("new_checkout_flow");
+   * if (flag) {
+   *   console.log(`Flag is ${flag.everyone ? 'enabled' : 'disabled'} for everyone`);
+   * }
+   * ```
+   */
   async getByName(name: string): Promise<FeatureFlag | null> {
     const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE name = $1`;
     const res = await this.db.query(sql, [name]);
@@ -104,12 +179,50 @@ export class FeatureFlagModel {
     return mapRow(res.rows[0]);
   }
 
+  /**
+   * Retrieves all feature flags, ordered by ID.
+   * 
+   * @returns Array of all feature flags in the database
+   * 
+   * @example
+   * ```typescript
+   * const flags = await model.list();
+   * console.log(`Total flags: ${flags.length}`);
+   * flags.forEach(flag => {
+   *   console.log(`${flag.name}: ${flag.everyone ?? 'conditional'}`);
+   * });
+   * ```
+   */
   async list(): Promise<FeatureFlag[]> {
     const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} ORDER BY id`;
     const res = await this.db.query(sql);
     return res.rows.map(mapRow);
   }
 
+  /**
+   * Updates an existing feature flag.
+   * 
+   * @param id - The unique identifier of the feature flag to update
+   * @param changes - Object containing the fields to update
+   * @returns The updated feature flag if found, null otherwise
+   * 
+   * @remarks
+   * The modified timestamp is automatically updated by a database trigger.
+   * Pass `null` for a field to clear it (e.g., `everyone: null` removes the override).
+   * If no changes are provided, returns the flag unchanged.
+   * 
+   * @example
+   * ```typescript
+   * // Gradually increase rollout percentage
+   * await model.update(flagId, { percent: 25 });
+   * 
+   * // Enable for everyone
+   * await model.update(flagId, { everyone: true });
+   * 
+   * // Remove everyone override, reverting to other rules
+   * await model.update(flagId, { everyone: null });
+   * ```
+   */
   async update(
     id: number,
     changes: UpdateChanges,
@@ -158,6 +271,20 @@ export class FeatureFlagModel {
     return mapRow(res.rows[0]);
   }
 
+  /**
+   * Deletes a feature flag from the database.
+   * 
+   * @param id - The unique identifier of the feature flag to delete
+   * @returns true if the flag was deleted, false if not found
+   * 
+   * @example
+   * ```typescript
+   * const deleted = await model.delete(flagId);
+   * if (deleted) {
+   *   console.log("Flag successfully removed");
+   * }
+   * ```
+   */
   async delete(id: number): Promise<boolean> {
     const res = await this.db.query(`DELETE FROM ${TABLE} WHERE id = $1`, [id]);
     return (res as any).rowCount > 0;
@@ -174,10 +301,65 @@ export class FeatureFlagModel {
     return flagGroups.some((group) => userGroups.includes(group));
   }
 
+  /**
+   * Computes the hash value for a user ID using MurmurHash3.
+   * 
+   * @param userId - The user ID to hash
+   * @returns The hash value used for percentage bucketing
+   * 
+   * @remarks
+   * This method is useful for debugging percentage rollouts.
+   * The hash value is consistent for the same user ID.
+   * The bucket is computed as `hash % 100`.
+   * 
+   * @example
+   * ```typescript
+   * const hash = await model.hashUserId("user_123");
+   * const bucket = hash % 100;
+   * console.log(`User bucket: ${bucket}`);
+   * // If bucket is 42 and percent is 50, user is in the rollout
+   * ```
+   */
   async hashUserId(userId: string): Promise<number> {
     return MurmurHash3(userId).result();
   }
 
+  /**
+   * Checks if a feature flag is active for a user based on configured rules.
+   * 
+   * @param params - Parameters for flag evaluation
+   * @param params.name - The name of the feature flag to check
+   * @param params.user - Optional user ID
+   * @param params.roles - Optional list of roles the user has
+   * @param params.groups - Optional list of groups the user belongs to
+   * @returns true if the flag is active for the user, false otherwise
+   * 
+   * @remarks
+   * Evaluation order (first match wins):
+   * 1. Everyone override (if set to true/false, returns immediately)
+   * 2. User ID is in the users list
+   * 3. User belongs to any group in the groups list
+   * 4. User has any role in the roles list
+   * 5. User falls within the percentage rollout (based on consistent hashing)
+   * 6. Default: returns false
+   * 
+   * @example
+   * ```typescript
+   * // Check for admin user
+   * const isActive = await model.isActiveForUser({
+   *   name: "new_feature",
+   *   user: "user_123",
+   *   roles: ["admin"],
+   *   groups: ["beta_testers"],
+   * });
+   * 
+   * if (isActive) {
+   *   // Show new feature
+   * } else {
+   *   // Show old feature
+   * }
+   * ```
+   */
   async isActiveForUser({
     name,
     user,
