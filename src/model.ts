@@ -50,12 +50,12 @@ function mapRow(row: any): FeatureFlag {
 
 /**
  * Model for managing feature flags stored in PostgreSQL.
- * 
+ *
  * @example
  * ```typescript
  * import { Pool } from "pg";
  * import { FeatureFlagModel } from "@brandtg/flapjack";
- * 
+ *
  * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
  * const featureFlags = new FeatureFlagModel(pool);
  * ```
@@ -65,9 +65,9 @@ export class FeatureFlagModel {
 
   /**
    * Creates a new FeatureFlagModel instance.
-   * 
+   *
    * @param db - A PostgreSQL Pool or Client instance that implements the Queryable interface
-   * 
+   *
    * @example
    * ```typescript
    * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -80,7 +80,7 @@ export class FeatureFlagModel {
 
   /**
    * Creates a new feature flag in the database.
-   * 
+   *
    * @param input - Feature flag configuration
    * @param input.name - Unique name for the feature flag (required)
    * @param input.everyone - Optional boolean to enable/disable for everyone (overrides all other settings)
@@ -90,9 +90,9 @@ export class FeatureFlagModel {
    * @param input.users - Optional list of specific user IDs that have this flag enabled
    * @param input.note - Optional description of the flag's purpose
    * @returns The created feature flag with generated id, created, and modified timestamps
-   * 
+   *
    * @throws Will throw an error if a flag with the same name already exists
-   * 
+   *
    * @example
    * ```typescript
    * const flag = await model.create({
@@ -139,10 +139,10 @@ export class FeatureFlagModel {
 
   /**
    * Retrieves a feature flag by its ID.
-   * 
+   *
    * @param id - The unique identifier of the feature flag
    * @returns The feature flag if found, null otherwise
-   * 
+   *
    * @example
    * ```typescript
    * const flag = await model.getById(123);
@@ -160,10 +160,10 @@ export class FeatureFlagModel {
 
   /**
    * Retrieves a feature flag by its name.
-   * 
+   *
    * @param name - The unique name of the feature flag
    * @returns The feature flag if found, null otherwise
-   * 
+   *
    * @example
    * ```typescript
    * const flag = await model.getByName("new_checkout_flow");
@@ -181,9 +181,9 @@ export class FeatureFlagModel {
 
   /**
    * Retrieves all feature flags, ordered by ID.
-   * 
+   *
    * @returns Array of all feature flags in the database
-   * 
+   *
    * @example
    * ```typescript
    * const flags = await model.list();
@@ -201,24 +201,24 @@ export class FeatureFlagModel {
 
   /**
    * Updates an existing feature flag.
-   * 
+   *
    * @param id - The unique identifier of the feature flag to update
    * @param changes - Object containing the fields to update
    * @returns The updated feature flag if found, null otherwise
-   * 
+   *
    * @remarks
    * The modified timestamp is automatically updated by a database trigger.
    * Pass `null` for a field to clear it (e.g., `everyone: null` removes the override).
    * If no changes are provided, returns the flag unchanged.
-   * 
+   *
    * @example
    * ```typescript
    * // Gradually increase rollout percentage
    * await model.update(flagId, { percent: 25 });
-   * 
+   *
    * // Enable for everyone
    * await model.update(flagId, { everyone: true });
-   * 
+   *
    * // Remove everyone override, reverting to other rules
    * await model.update(flagId, { everyone: null });
    * ```
@@ -273,10 +273,10 @@ export class FeatureFlagModel {
 
   /**
    * Deletes a feature flag from the database.
-   * 
+   *
    * @param id - The unique identifier of the feature flag to delete
    * @returns true if the flag was deleted, false if not found
-   * 
+   *
    * @example
    * ```typescript
    * const deleted = await model.delete(flagId);
@@ -303,15 +303,15 @@ export class FeatureFlagModel {
 
   /**
    * Computes the hash value for a user ID using MurmurHash3.
-   * 
+   *
    * @param userId - The user ID to hash
    * @returns The hash value used for percentage bucketing
-   * 
+   *
    * @remarks
    * This method is useful for debugging percentage rollouts.
    * The hash value is consistent for the same user ID.
    * The bucket is computed as `hash % 100`.
-   * 
+   *
    * @example
    * ```typescript
    * const hash = await model.hashUserId("user_123");
@@ -326,14 +326,14 @@ export class FeatureFlagModel {
 
   /**
    * Checks if a feature flag is active for a user based on configured rules.
-   * 
+   *
    * @param params - Parameters for flag evaluation
    * @param params.name - The name of the feature flag to check
    * @param params.user - Optional user ID
    * @param params.roles - Optional list of roles the user has
    * @param params.groups - Optional list of groups the user belongs to
    * @returns true if the flag is active for the user, false otherwise
-   * 
+   *
    * @remarks
    * Evaluation order (first match wins):
    * 1. Everyone override (if set to true/false, returns immediately)
@@ -342,7 +342,7 @@ export class FeatureFlagModel {
    * 4. User has any role in the roles list
    * 5. User falls within the percentage rollout (based on consistent hashing)
    * 6. Default: returns false
-   * 
+   *
    * @example
    * ```typescript
    * // Check for admin user
@@ -352,7 +352,7 @@ export class FeatureFlagModel {
    *   roles: ["admin"],
    *   groups: ["beta_testers"],
    * });
-   * 
+   *
    * if (isActive) {
    *   // Show new feature
    * } else {

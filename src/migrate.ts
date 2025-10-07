@@ -19,33 +19,33 @@ export interface MigrationOptions {
 
 /**
  * Run Flapjack database migrations.
- * 
+ *
  * This function applies all pending migrations to create or update the
  * flapjack_feature_flag table in your PostgreSQL database.
- * 
+ *
  * @param options - Migration configuration options
  * @param options.databaseUrl - PostgreSQL connection URL
  * @param options.migrationsTable - Name of the migrations tracking table (default: 'pgmigrations')
  * @param options.schema - Schema name to create tables in (optional)
  * @returns Promise that resolves when migrations are complete
- * 
+ *
  * @throws Will throw an error if the database connection fails or migrations cannot be applied
- * 
+ *
  * @example
  * ```typescript
  * import { runMigrations } from "@brandtg/flapjack";
- * 
+ *
  * // Basic usage
  * await runMigrations({
  *   databaseUrl: process.env.DATABASE_URL,
  * });
- * 
+ *
  * // With custom migrations table
  * await runMigrations({
  *   databaseUrl: process.env.DATABASE_URL,
  *   migrationsTable: "my_migrations",
  * });
- * 
+ *
  * // With custom schema
  * await runMigrations({
  *   databaseUrl: process.env.DATABASE_URL,

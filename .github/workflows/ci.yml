@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: flapjack
+          POSTGRES_PASSWORD: flapjack
+          POSTGRES_DB: flapjack
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    strategy:
+      matrix:
+        # TODO: Enable for other node versions
+        # node-version: [18.x, 20.x, 22.x]
+        node-version: [22.x]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npx prettier --check .
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run type checking
+        run: npm run typecheck
+
+      - name: Build project
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://flapjack:flapjack@localhost:5432/flapjack
+
+      - name: Run smoke test
+        run: npm run smoke
+        env:
+          DATABASE_URL: postgresql://flapjack:flapjack@localhost:5432/flapjack
+
+  package-check:
+    name: Package Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Verify package contents
+        run: |
+          echo "=== Checking package contents ==="
+          npm pack --dry-run
+
+          echo ""
+          echo "=== Verifying no test files in package ==="
+          if npm pack --dry-run 2>&1 | grep -E "\.test\.(js|ts|d\.ts)"; then
+            echo "ERROR: Test files found in package!"
+            exit 1
+          else
+            echo "✓ No test files in package"
+          fi
+
+          echo ""
+          echo "=== Verifying no src/ directory in package ==="
+          if npm pack --dry-run 2>&1 | grep -E "src/"; then
+            echo "ERROR: Source files found in package!"
+            exit 1
+          else
+            echo "✓ No source files in package"
+          fi
+
+          echo ""
+          echo "=== Package size check ==="
+          npm pack --dry-run 2>&1 | grep "package size"
