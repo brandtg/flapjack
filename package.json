@@ -6,6 +6,9 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "flapjack": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -25,23 +28,26 @@
     "dev:docker:up": "docker compose -f docker-compose.yml up -d",
     "dev:docker:down": "docker compose -f docker-compose.yml down -v",
     "create-migration": "npx node-pg-migrate create --",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "prepublish-only": "npm run lint && npm run test && npm run build",
-    "pack:dev": "npm run build && npm pack"
+    "pack:dev": "npm run build && npm pack",
+    "smoke": "npm run build && node dist/cli.js --help && node dist/cli.js hash-user smoke"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
     "imurmurhash": "^0.1.4",
     "node-pg-migrate": "^8.0.3",
-    "pg": "^8.12.0"
+    "pg": "^8.12.0",
+    "yargs": "^18.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.37.0",
     "@types/imurmurhash": "^0.1.4",
     "@types/pg": "^8.11.10",
-    "dotenv": "^17.2.3",
+    "@types/yargs": "^17.0.33",
     "dotenv-cli": "^10.0.0",
     "eslint": "^9.37.0",
     "prettier": "^3.6.2",

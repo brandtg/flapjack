@@ -197,7 +197,7 @@ export class FeatureFlagModel {
     }
 
     // Everyone Override: If everyone is true or false, return that value immediately
-    if (flag.everyone !== undefined) {
+    if (flag.everyone !== undefined && flag.everyone !== null) {
       return flag.everyone;
     }
 
