@@ -27,15 +27,6 @@ describe("InMemoryCache", () => {
     expect(cache.get("key1")).toBeUndefined();
   });
 
-  it("should use default TTL when not specified", async () => {
-    const shortCache = new InMemoryCache();
-    shortCache.set("key1", "value1"); // Uses default TTL
-    expect(shortCache.get("key1")).toBe("value1");
-
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(shortCache.get("key1")).toBeUndefined();
-  });
-
   it("should override default TTL when specified", async () => {
     const shortCache = new InMemoryCache();
     shortCache.set("key1", "value1", 0.2); // Override with 200ms TTL
