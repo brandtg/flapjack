@@ -6,7 +6,7 @@ import { Pool } from "pg";
 import { FeatureFlagModel } from "./model.js";
 import dotenv from "dotenv";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 function createDatabase() {
   const connectionString = process.env.DATABASE_URL;
