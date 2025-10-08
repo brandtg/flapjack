@@ -1,9 +1,9 @@
 import { FeatureFlagModel } from "./model.js";
 import MurmurHash3 from "imurmurhash";
 
-export interface Cache {
-  get(key: string): any;
-  set(key: string, value: any, ttl?: number): void;
+export interface Cache<T> {
+  get(key: string): T | undefined;
+  set(key: string, value: T, ttl?: number): void;
   delete(key: string): void;
 }
 
@@ -17,10 +17,10 @@ const DEFAULT_TTL = 60 * 5; // 5 minutes
 /**
  * Simple in-memory cache with TTL support.
  */
-export class InMemoryCache implements Cache {
-  private cache = new Map<string, CacheEntry<any>>();
+export class InMemoryCache<T> implements Cache<T> {
+  private cache = new Map<string, CacheEntry<T>>();
 
-  get(key: string): any {
+  get(key: string): T | undefined {
     const entry = this.cache.get(key);
     if (!entry) {
       return undefined;
@@ -36,7 +36,7 @@ export class InMemoryCache implements Cache {
     return entry.value;
   }
 
-  set(key: string, value: any, ttl?: number): void {
+  set(key: string, value: T, ttl?: number): void {
     const expiresAt = ttl !== undefined ? Date.now() + ttl * 1000 : undefined;
     this.cache.set(key, { value, expiresAt });
   }
@@ -74,7 +74,7 @@ export class InMemoryCache implements Cache {
 
 export class FeatureFlagCache {
   private model: FeatureFlagModel;
-  private cache: Cache;
+  private cache: Cache<boolean>;
   private ttl: number;
 
   constructor({
@@ -83,7 +83,7 @@ export class FeatureFlagCache {
     ttl = DEFAULT_TTL,
   }: {
     model: FeatureFlagModel;
-    cache: Cache;
+    cache: Cache<boolean>;
     ttl?: number;
   }) {
     this.model = model;
