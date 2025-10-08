@@ -140,49 +140,97 @@ await featureFlags.isActiveForUser({
 
 ## Performance Considerations
 
-⚠️ **Important**: Flapjack queries the database on every `isActiveForUser()` call. For high-traffic applications, consider:
+⚠️ **Important**: Without caching, Flapjack queries the database on every `isActiveForUser()` call. For high-traffic applications, use the built-in caching layer:
 
-### Recommended Caching Strategy
+### Built-in Caching Layer
+
+Flapjack includes a high-performance caching layer with TTL support:
 
 ```typescript
 import { Pool } from "pg";
-import { FeatureFlagModel } from "@brandtg/flapjack";
+import {
+  FeatureFlagModel,
+  FeatureFlagCache,
+  InMemoryCache,
+} from "@brandtg/flapjack";
 
-// Simple in-memory cache with TTL
-class CachedFeatureFlags {
-  private model: FeatureFlagModel;
-  private cache = new Map<string, { flag: any; expires: number }>();
-  private ttlMs = 60000; // 1 minute
+// Set up the database model
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-  constructor(pool: Pool) {
-    this.model = new FeatureFlagModel(pool);
+// Create cached feature flags instance
+const featureFlags = new FeatureFlagCache({
+  model: new FeatureFlagModel(pool),
+  cache: new InMemoryCache<boolean>(),
+  ttl: 300, // Set TTL to 5 minutes (300 seconds)
+});
+
+// Use exactly the same as the model, but with automatic caching
+const isActive = await featureFlags.isActiveForUser({
+  name: "new_feature",
+  user: "user_123",
+  roles: ["admin"],
+  groups: ["beta_testers"],
+});
+```
+
+### Cache Key Generation
+
+The cache automatically generates deterministic keys using MurmurHash3 of the flag name and user parameters:
+
+```typescript
+// These calls generate the same cache key:
+await featureFlags.isActiveForUser({
+  name: "test",
+  roles: ["admin", "user"],
+  groups: ["beta", "alpha"],
+});
+
+await featureFlags.isActiveForUser({
+  name: "test",
+  roles: ["user", "admin"], // Different order
+  groups: ["alpha", "beta"], // Different order
+});
+```
+
+### Custom Cache Implementation
+
+You can implement your own cache (Redis, Memcached, etc.) by implementing the `Cache` interface:
+
+```typescript
+import type { Cache } from "@brandtg/flapjack";
+
+class RedisCache implements Cache {
+  private redis: RedisClient;
+
+  constructor(redis: RedisClient) {
+    this.redis = redis;
   }
 
-  async isActiveForUser(params: {
-    name: string;
-    user?: string;
-    roles?: string[];
-    groups?: string[];
-  }): Promise<boolean> {
-    const now = Date.now();
-    const cached = this.cache.get(params.name);
+  get(key: string): any {
+    const value = this.redis.get(key);
+    return value ? JSON.parse(value) : undefined;
+  }
 
-    // Use cached flag if still valid
-    if (cached && cached.expires > now) {
-      // Re-evaluate with cached flag data
-      return this.evaluateLocally(cached.flag, params);
+  set(key: string, value: any, ttl?: number): void {
+    const serialized = JSON.stringify(value);
+    if (ttl) {
+      this.redis.setex(key, ttl, serialized);
+    } else {
+      this.redis.set(key, serialized);
     }
-
-    // Cache miss or expired - fetch from DB
-    return await this.model.isActiveForUser(params);
   }
 
-  private evaluateLocally(flag: any, params: any): boolean {
-    // Implement evaluation logic locally to avoid DB queries
-    // See model.ts isActiveForUser() for reference
-    // ...
+  delete(key: string): void {
+    this.redis.del(key);
   }
 }
+
+// Use your custom cache
+const featureFlags = new FeatureFlagCache({
+  model,
+  cache: new RedisCache(redisClient),
+  ttl: 300,
+});
 ```
 
 ### Database Connection Pooling
