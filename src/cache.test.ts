@@ -3,7 +3,7 @@ import { InMemoryCache, FeatureFlagCache, Cache } from "./cache.js";
 import { FeatureFlagModel } from "./model.js";
 
 describe("InMemoryCache", () => {
-  let cache: InMemoryCache;
+  let cache: InMemoryCache<string>;
 
   beforeEach(() => {
     cache = new InMemoryCache();
@@ -85,7 +85,7 @@ describe("InMemoryCache", () => {
 
 describe("FeatureFlagCache", () => {
   let mockModel: FeatureFlagModel;
-  let cache: Cache;
+  let cache: Cache<boolean>;
   let flagCache: FeatureFlagCache;
 
   beforeEach(() => {
