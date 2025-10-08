@@ -40,7 +40,7 @@
     "smoke": "npm run build && node dist/cli.js --help && node dist/cli.js hash-user smoke"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.2.3",
     "imurmurhash": "^0.1.4",
     "node-pg-migrate": "^8.0.3",
     "pg": "^8.12.0",
