@@ -1,4 +1,4 @@
-import type { FeatureFlag } from "./types.js";
+import type { FeatureFlag, FeatureFlagEventHandlers } from "./types.js";
 import type { QueryResult } from "pg";
 import MurmurHash3 from "imurmurhash";
 
@@ -20,6 +20,7 @@ const COLUMNS = [
   "note",
   "created",
   "modified",
+  "expires",
 ] as const;
 
 type CreateInput = Omit<FeatureFlag, "id" | "created" | "modified">;
@@ -45,6 +46,7 @@ function mapRow(row: any): FeatureFlag {
     note: row.note ?? undefined,
     created: new Date(row.created),
     modified: new Date(row.modified),
+    expires: row.expires ? new Date(row.expires) : undefined,
   };
 }
 
@@ -62,11 +64,13 @@ function mapRow(row: any): FeatureFlag {
  */
 export class FeatureFlagModel {
   private db: Queryable;
+  private eventHandlers?: FeatureFlagEventHandlers;
 
   /**
    * Creates a new FeatureFlagModel instance.
    *
    * @param db - A PostgreSQL Pool or Client instance that implements the Queryable interface
+   * @param eventHandlers - Optional event handlers for feature flag events
    *
    * @example
    * ```typescript
@@ -74,8 +78,9 @@ export class FeatureFlagModel {
    * const model = new FeatureFlagModel(pool);
    * ```
    */
-  constructor(db: Queryable) {
+  constructor(db: Queryable, eventHandlers?: FeatureFlagEventHandlers) {
     this.db = db;
+    this.eventHandlers = eventHandlers;
   }
 
   /**
@@ -89,6 +94,7 @@ export class FeatureFlagModel {
    * @param input.groups - Optional list of user groups that have this flag enabled
    * @param input.users - Optional list of specific user IDs that have this flag enabled
    * @param input.note - Optional description of the flag's purpose
+   * @param input.expires - Optional expiration date for the feature flag
    * @returns The created feature flag with generated id, created, and modified timestamps
    *
    * @throws Will throw an error if a flag with the same name already exists
@@ -129,6 +135,10 @@ export class FeatureFlagModel {
     if ("note" in input) {
       cols.push("note");
       vals.push(input.note ?? null);
+    }
+    if ("expires" in input) {
+      cols.push("expires");
+      vals.push(input.expires ?? null);
     }
 
     const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
@@ -258,6 +268,10 @@ export class FeatureFlagModel {
       sets.push(`note = $${sets.length + 1}`);
       vals.push(changes.note ?? null);
     }
+    if ("expires" in changes) {
+      sets.push(`expires = $${sets.length + 1}`);
+      vals.push(changes.expires ?? null);
+    }
 
     if (sets.length === 0) {
       return this.getById(id);
@@ -376,6 +390,19 @@ export class FeatureFlagModel {
     // No such flag
     if (!flag) {
       return false;
+    }
+
+    // If the flag has expired, trigger event and return false
+    if (
+      this.eventHandlers?.onExpired &&
+      flag &&
+      flag.expires &&
+      flag.expires <= new Date()
+    ) {
+      const expiredResult = await this.eventHandlers.onExpired({ flag });
+      if (expiredResult !== undefined) {
+        return expiredResult;
+      }
     }
 
     // Everyone Override: If everyone is true or false, return that value immediately

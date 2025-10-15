@@ -135,4 +135,65 @@ describe("CLI smoke", () => {
     expect(deleteRes.code).toBe(0);
     expect(deleteRes.stdout).toContain("deleted successfully");
   });
+
+  it("handles expires field correctly", async () => {
+    // Create with expires
+    const expiresDate = "2026-12-31T23:59:59Z";
+    const createRes = await runCli(
+      [
+        "create",
+        "--name",
+        "cli-test-expires-flag",
+        "--everyone",
+        "true",
+        "--expires",
+        expiresDate,
+        "--note",
+        "testing expires field",
+      ],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(createRes.code).toBe(0);
+    const created = JSON.parse(createRes.stdout.trim());
+    expect(created.name).toBe("cli-test-expires-flag");
+    expect(new Date(created.expires).toISOString()).toBe(
+      new Date(expiresDate).toISOString(),
+    );
+
+    // Get and verify expires is present
+    const getRes = await runCli(["get", String(created.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(getRes.code).toBe(0);
+    const fetched = JSON.parse(getRes.stdout.trim());
+    expect(new Date(fetched.expires).toISOString()).toBe(
+      new Date(expiresDate).toISOString(),
+    );
+
+    // Update expires to a new date
+    const newExpiresDate = "2027-06-15T12:00:00Z";
+    const updateRes = await runCli(
+      ["update", String(created.id), "--expires", newExpiresDate],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(updateRes.code).toBe(0);
+    const updated = JSON.parse(updateRes.stdout.trim());
+    expect(new Date(updated.expires).toISOString()).toBe(
+      new Date(newExpiresDate).toISOString(),
+    );
+
+    // Clear expires
+    const clearRes = await runCli(
+      ["update", String(created.id), "--clear-expires"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(clearRes.code).toBe(0);
+    const cleared = JSON.parse(clearRes.stdout.trim());
+    expect(cleared.expires).toBeUndefined();
+
+    // Clean up
+    await runCli(["delete", String(created.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+  });
 });
