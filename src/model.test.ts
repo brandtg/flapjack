@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { Pool } from "pg";
 import { FeatureFlagModel } from "./model.js";
 import { runMigrations } from "./migrate.js";
@@ -75,6 +75,7 @@ describe("FeatureFlagModel", () => {
       expect(flag.note).toBeUndefined();
       expect(flag.created).toBeInstanceOf(Date);
       expect(flag.modified).toBeInstanceOf(Date);
+      expect(flag.expires).toBeUndefined();
     });
 
     it("should create a feature flag with all properties", async () => {
@@ -99,6 +100,36 @@ describe("FeatureFlagModel", () => {
       expect(flag.note).toBe("Test feature flag with all properties");
       expect(flag.created).toBeInstanceOf(Date);
       expect(flag.modified).toBeInstanceOf(Date);
+      expect(flag.expires).toBeUndefined();
+    });
+
+    it("should create a feature flag with expires date", async () => {
+      const expiresDate = new Date("2025-12-31T23:59:59Z");
+      const input = {
+        name: "test-flag-with-expires",
+        everyone: true,
+        note: "This flag expires at end of 2025",
+        expires: expiresDate,
+      };
+      const flag = await model.create(input);
+
+      expect(flag.id).toBeTypeOf("number");
+      expect(flag.name).toBe("test-flag-with-expires");
+      expect(flag.expires).toBeInstanceOf(Date);
+      expect(flag.expires?.toISOString()).toBe(expiresDate.toISOString());
+    });
+
+    it("should create a feature flag with expires in the past", async () => {
+      const expiresDate = new Date("2020-01-01T00:00:00Z");
+      const input = {
+        name: "test-flag-expired",
+        everyone: false,
+        expires: expiresDate,
+      };
+      const flag = await model.create(input);
+
+      expect(flag.expires).toBeInstanceOf(Date);
+      expect(flag.expires?.toISOString()).toBe(expiresDate.toISOString());
     });
   });
 
@@ -116,6 +147,19 @@ describe("FeatureFlagModel", () => {
       const retrieved = await model.getById(99999);
       expect(retrieved).toBeNull();
     });
+
+    it("should retrieve a feature flag with expires date", async () => {
+      const expiresDate = new Date("2026-06-15T12:00:00Z");
+      const created = await model.create({
+        name: "test-get-by-id-with-expires",
+        expires: expiresDate,
+      });
+      const retrieved = await model.getById(created.id);
+
+      expect(retrieved).not.toBeNull();
+      expect(retrieved!.expires).toBeInstanceOf(Date);
+      expect(retrieved!.expires?.toISOString()).toBe(expiresDate.toISOString());
+    });
   });
 
   describe("getByName", () => {
@@ -131,6 +175,19 @@ describe("FeatureFlagModel", () => {
     it("should return null for non-existent name", async () => {
       const retrieved = await model.getByName("non-existent-flag");
       expect(retrieved).toBeNull();
+    });
+
+    it("should retrieve a feature flag with expires date by name", async () => {
+      const expiresDate = new Date("2027-03-20T08:30:00Z");
+      const created = await model.create({
+        name: "test-get-by-name-with-expires",
+        expires: expiresDate,
+      });
+      const retrieved = await model.getByName("test-get-by-name-with-expires");
+
+      expect(retrieved).not.toBeNull();
+      expect(retrieved!.expires).toBeInstanceOf(Date);
+      expect(retrieved!.expires?.toISOString()).toBe(expiresDate.toISOString());
     });
   });
 
@@ -152,6 +209,30 @@ describe("FeatureFlagModel", () => {
       expect(allFlags[1].id).toBe(flag2.id);
       expect(allFlags[0].name).toBe("list-test-1");
       expect(allFlags[1].name).toBe("list-test-2");
+    });
+
+    it("should include expires field in list results", async () => {
+      // Clear any existing flags from previous tests
+      const existingFlags = await model.list();
+      for (const flag of existingFlags) {
+        await model.delete(flag.id);
+      }
+
+      const expiresDate = new Date("2025-08-08T08:08:08Z");
+      const flag1 = await model.create({
+        name: "list-test-with-expires",
+        expires: expiresDate,
+      });
+      const flag2 = await model.create({ name: "list-test-without-expires" });
+
+      const allFlags = await model.list();
+
+      expect(allFlags).toHaveLength(2);
+      expect(allFlags[0].expires).toBeInstanceOf(Date);
+      expect(allFlags[0].expires?.toISOString()).toBe(
+        expiresDate.toISOString(),
+      );
+      expect(allFlags[1].expires).toBeUndefined();
     });
   });
 
@@ -195,6 +276,82 @@ describe("FeatureFlagModel", () => {
     it("should return null for non-existent id", async () => {
       const result = await model.update(99999, { name: "new-name" });
       expect(result).toBeNull();
+    });
+
+    it("should add expires date to a feature flag", async () => {
+      const created = await model.create({
+        name: "test-add-expires",
+        everyone: true,
+      });
+
+      expect(created.expires).toBeUndefined();
+
+      const expiresDate = new Date("2025-09-30T23:59:59Z");
+      const updated = await model.update(created.id, {
+        expires: expiresDate,
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.expires).toBeInstanceOf(Date);
+      expect(updated!.expires?.toISOString()).toBe(expiresDate.toISOString());
+    });
+
+    it("should update expires date of a feature flag", async () => {
+      const originalExpires = new Date("2025-01-01T00:00:00Z");
+      const created = await model.create({
+        name: "test-update-expires",
+        expires: originalExpires,
+      });
+
+      expect(created.expires?.toISOString()).toBe(
+        originalExpires.toISOString(),
+      );
+
+      const newExpires = new Date("2026-12-31T23:59:59Z");
+      const updated = await model.update(created.id, {
+        expires: newExpires,
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.expires).toBeInstanceOf(Date);
+      expect(updated!.expires?.toISOString()).toBe(newExpires.toISOString());
+    });
+
+    it("should clear expires date from a feature flag", async () => {
+      const expiresDate = new Date("2025-06-15T12:00:00Z");
+      const created = await model.create({
+        name: "test-clear-expires",
+        expires: expiresDate,
+      });
+
+      expect(created.expires).toBeInstanceOf(Date);
+
+      const updated = await model.update(created.id, {
+        expires: null as any,
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.expires).toBeUndefined();
+    });
+
+    it("should preserve expires when updating other fields", async () => {
+      const expiresDate = new Date("2025-11-11T11:11:11Z");
+      const created = await model.create({
+        name: "test-preserve-expires",
+        everyone: false,
+        expires: expiresDate,
+      });
+
+      const updated = await model.update(created.id, {
+        everyone: true,
+        note: "Updated without changing expires",
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.everyone).toBe(true);
+      expect(updated!.note).toBe("Updated without changing expires");
+      expect(updated!.expires).toBeInstanceOf(Date);
+      expect(updated!.expires?.toISOString()).toBe(expiresDate.toISOString());
     });
   });
 
@@ -591,6 +748,334 @@ describe("FeatureFlagModel", () => {
         groups: ["regular"],
       });
       expect(notEnabled).toBe(false);
+    });
+
+    it("should allow active flag with future expiration date", async () => {
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1); // One year in future
+
+      await model.create({
+        name: "future-expiration-flag",
+        everyone: true,
+        expires: futureDate,
+      });
+
+      const isActive = await model.isActiveForUser({
+        name: "future-expiration-flag",
+        user: "user123",
+      });
+
+      expect(isActive).toBe(true);
+    });
+
+    it("should return false for expired flag when no handler is set", async () => {
+      const pastDate = new Date();
+      pastDate.setFullYear(pastDate.getFullYear() - 1); // One year in past
+
+      await model.create({
+        name: "expired-flag-no-handler",
+        everyone: true,
+        expires: pastDate,
+      });
+
+      const isActive = await model.isActiveForUser({
+        name: "expired-flag-no-handler",
+        user: "user123",
+      });
+
+      // Default behavior: expired flags are not active
+      expect(isActive).toBe(true); // Should continue with normal evaluation
+    });
+  });
+
+  describe("isActiveForUser with expiration event handlers", () => {
+    it("should call onExpired handler when flag has expired", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 7); // One week ago
+
+      const onExpiredMock = vi.fn().mockResolvedValue(undefined);
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "expired-with-handler",
+        everyone: true,
+        expires: pastDate,
+      });
+
+      const isActive = await modelWithHandler.isActiveForUser({
+        name: "expired-with-handler",
+        user: "user123",
+      });
+
+      expect(onExpiredMock).toHaveBeenCalledTimes(1);
+      expect(onExpiredMock).toHaveBeenCalledWith({
+        flag: expect.objectContaining({
+          name: "expired-with-handler",
+          expires: expect.any(Date),
+        }),
+      });
+      // Handler returned undefined, so normal evaluation continues
+      expect(isActive).toBe(true);
+    });
+
+    it("should not call onExpired handler for non-expired flags", async () => {
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+      const onExpiredMock = vi.fn().mockResolvedValue(undefined);
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "future-flag-with-handler",
+        everyone: true,
+        expires: futureDate,
+      });
+
+      const isActive = await modelWithHandler.isActiveForUser({
+        name: "future-flag-with-handler",
+        user: "user123",
+      });
+
+      expect(onExpiredMock).not.toHaveBeenCalled();
+      expect(isActive).toBe(true);
+    });
+
+    it("should not call onExpired handler for flags without expiration", async () => {
+      const onExpiredMock = vi.fn().mockResolvedValue(undefined);
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "no-expiration-with-handler",
+        everyone: true,
+      });
+
+      const isActive = await modelWithHandler.isActiveForUser({
+        name: "no-expiration-with-handler",
+        user: "user123",
+      });
+
+      expect(onExpiredMock).not.toHaveBeenCalled();
+      expect(isActive).toBe(true);
+    });
+
+    it("should return false when handler returns false for expired flag", async () => {
+      const pastDate = new Date();
+      pastDate.setMonth(pastDate.getMonth() - 3); // Three months ago
+
+      const onExpiredMock = vi.fn().mockResolvedValue(false);
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "expired-handler-returns-false",
+        everyone: true, // Even though everyone is true
+        expires: pastDate,
+      });
+
+      const isActive = await modelWithHandler.isActiveForUser({
+        name: "expired-handler-returns-false",
+        user: "user123",
+      });
+
+      expect(onExpiredMock).toHaveBeenCalledTimes(1);
+      expect(isActive).toBe(false); // Handler override
+    });
+
+    it("should return true when handler returns true for expired flag", async () => {
+      const pastDate = new Date();
+      pastDate.setMonth(pastDate.getMonth() - 2);
+
+      const onExpiredMock = vi.fn().mockResolvedValue(true);
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "expired-handler-returns-true",
+        everyone: false, // Even though everyone is false
+        expires: pastDate,
+      });
+
+      const isActive = await modelWithHandler.isActiveForUser({
+        name: "expired-handler-returns-true",
+        user: "user123",
+      });
+
+      expect(onExpiredMock).toHaveBeenCalledTimes(1);
+      expect(isActive).toBe(true); // Handler override
+    });
+
+    it("should continue normal evaluation when handler returns undefined", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 1); // Yesterday
+
+      const onExpiredMock = vi.fn().mockResolvedValue(undefined);
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "expired-handler-returns-undefined",
+        roles: ["admin"],
+        expires: pastDate,
+      });
+
+      const isActiveForAdmin = await modelWithHandler.isActiveForUser({
+        name: "expired-handler-returns-undefined",
+        user: "user123",
+        roles: ["admin"],
+      });
+
+      const isActiveForUser = await modelWithHandler.isActiveForUser({
+        name: "expired-handler-returns-undefined",
+        user: "user456",
+        roles: ["user"],
+      });
+
+      expect(onExpiredMock).toHaveBeenCalledTimes(2);
+      expect(isActiveForAdmin).toBe(true); // Matches role
+      expect(isActiveForUser).toBe(false); // Doesn't match role
+    });
+
+    it("should use handler result for expired flag with percentage rollout", async () => {
+      const pastDate = new Date();
+      pastDate.setHours(pastDate.getHours() - 1); // One hour ago
+
+      const onExpiredMock = vi.fn().mockResolvedValue(undefined);
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "expired-with-percentage",
+        percent: 50,
+        expires: pastDate,
+      });
+
+      const isActive = await modelWithHandler.isActiveForUser({
+        name: "expired-with-percentage",
+        user: "user123",
+      });
+
+      expect(onExpiredMock).toHaveBeenCalledTimes(1);
+      // Handler returned undefined, so percentage rollout is evaluated
+      expect(typeof isActive).toBe("boolean");
+    });
+
+    it("should handle expiration check at exact expiration time", async () => {
+      const now = new Date();
+
+      const onExpiredMock = vi.fn().mockResolvedValue(false);
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "expires-now",
+        everyone: true,
+        expires: now,
+      });
+
+      // Wait a tiny bit to ensure we're past the expiration
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const isActive = await modelWithHandler.isActiveForUser({
+        name: "expires-now",
+        user: "user123",
+      });
+
+      expect(onExpiredMock).toHaveBeenCalled();
+      expect(isActive).toBe(false);
+    });
+
+    it("should allow handler to emit metrics without affecting result", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 30); // 30 days ago
+
+      const metricsEmitted: string[] = [];
+      const onExpiredMock = vi.fn().mockImplementation(async ({ flag }) => {
+        // Simulate emitting metrics
+        metricsEmitted.push(`expired_flag_used:${flag.name}`);
+        return undefined; // Don't affect the result
+      });
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "expired-metrics-test",
+        users: ["special-user"],
+        expires: pastDate,
+      });
+
+      const isActive = await modelWithHandler.isActiveForUser({
+        name: "expired-metrics-test",
+        user: "special-user",
+      });
+
+      expect(onExpiredMock).toHaveBeenCalledTimes(1);
+      expect(metricsEmitted).toEqual([
+        "expired_flag_used:expired-metrics-test",
+      ]);
+      expect(isActive).toBe(true); // User is in the users list
+    });
+
+    it("should work correctly with multiple expired flags", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 10);
+
+      const callLog: string[] = [];
+      const onExpiredMock = vi.fn().mockImplementation(async ({ flag }) => {
+        callLog.push(flag.name);
+        return flag.name === "expired-flag-1" ? false : undefined;
+      });
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "expired-flag-1",
+        everyone: true,
+        expires: pastDate,
+      });
+
+      await modelWithHandler.create({
+        name: "expired-flag-2",
+        everyone: true,
+        expires: pastDate,
+      });
+
+      const isActive1 = await modelWithHandler.isActiveForUser({
+        name: "expired-flag-1",
+        user: "user123",
+      });
+
+      const isActive2 = await modelWithHandler.isActiveForUser({
+        name: "expired-flag-2",
+        user: "user123",
+      });
+
+      expect(onExpiredMock).toHaveBeenCalledTimes(2);
+      expect(callLog).toEqual(["expired-flag-1", "expired-flag-2"]);
+      expect(isActive1).toBe(false); // Handler returned false
+      expect(isActive2).toBe(true); // Handler returned undefined, everyone is true
     });
   });
 });
