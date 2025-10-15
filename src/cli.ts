@@ -58,6 +58,10 @@ const flagOptions = {
     type: "string" as const,
     describe: "Description of where this flag is used and what it does",
   },
+  expires: {
+    type: "string" as const,
+    describe: "Expiration date (ISO 8601 format)",
+  },
 };
 
 // Create command
@@ -84,6 +88,7 @@ cli.command(
       if (argv.groups !== undefined) input.groups = argv.groups as string[];
       if (argv.users !== undefined) input.users = argv.users as string[];
       if (argv.note !== undefined) input.note = argv.note;
+      if (argv.expires !== undefined) input.expires = new Date(argv.expires);
 
       const flag = await model.create(input);
       console.log(JSON.stringify(flag, null, 2));
@@ -215,6 +220,10 @@ cli.command(
           type: "boolean" as const,
           describe: "Clear the note",
         },
+        "clear-expires": {
+          type: "boolean" as const,
+          describe: "Clear the expiration date",
+        },
       });
   },
   async (argv) => {
@@ -250,6 +259,11 @@ cli.command(
       // Note: clear flag takes precedence
       if ((argv as any).clearNote) changes.note = null;
       else if (argv.note !== undefined) changes.note = argv.note;
+
+      // Expires: clear flag takes precedence
+      if ((argv as any).clearExpires) changes.expires = null;
+      else if (argv.expires !== undefined)
+        changes.expires = new Date(argv.expires);
 
       const flag = await model.update(argv.id!, changes);
       if (flag) {
