@@ -480,6 +480,12 @@ flapjack hash-user user_123
 
 ### Setup
 
+Install dependencies
+
+```bash
+npm install
+```
+
 Create an environment file:
 
 ```bash
@@ -501,7 +507,7 @@ npm run dev:migrate
 ### Running Tests
 
 ```bash
-npm test
+npm run test
 ```
 
 ### Database Management

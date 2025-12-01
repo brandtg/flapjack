@@ -1,4 +1,8 @@
-import type { FeatureFlag, FeatureFlagEventHandlers } from "./types.js";
+import type {
+  FeatureFlag,
+  FeatureFlagEventHandlers,
+  FeatureFlagGroup,
+} from "./types.js";
 import type { QueryResult } from "pg";
 import MurmurHash3 from "imurmurhash";
 
@@ -187,6 +191,26 @@ export class FeatureFlagModel {
     const res = await this.db.query(sql, [name]);
     if (res.rows.length === 0) return null;
     return mapRow(res.rows[0]);
+  }
+
+  /**
+   * Retrieves multiple feature flags by their IDs.
+   *
+   * @param ids - Array of feature flag IDs to retrieve
+   * @returns Array of feature flags found (may be shorter than input if some IDs don't exist)
+   *
+   * @example
+   * ```typescript
+   * const flags = await model.getMany([1, 2, 3]);
+   * console.log(`Found ${flags.length} flags`);
+   * ```
+   */
+  async getMany(ids: number[]): Promise<FeatureFlag[]> {
+    if (ids.length === 0) return [];
+
+    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE id = ANY($1)`;
+    const res = await this.db.query(sql, [ids]);
+    return res.rows.map(mapRow);
   }
 
   /**
@@ -440,5 +464,381 @@ export class FeatureFlagModel {
 
     // Default: Return false
     return false;
+  }
+}
+
+const GROUP_TABLE = "flapjack_feature_flag_group";
+const GROUP_MEMBER_TABLE = "flapjack_feature_flag_group_member";
+
+const GROUP_COLUMNS = ["id", "name", "note", "created", "modified"] as const;
+
+type CreateGroupInput = Omit<FeatureFlagGroup, "id" | "created" | "modified">;
+type UpdateGroupChanges = Partial<
+  Omit<FeatureFlagGroup, "id" | "created" | "modified">
+>;
+type UpdateAllChanges = Partial<
+  Pick<FeatureFlag, "everyone" | "percent" | "roles" | "groups" | "users">
+>;
+
+function mapGroupRow(row: any): FeatureFlagGroup {
+  return {
+    id: row.id,
+    name: row.name,
+    note: row.note ?? undefined,
+    created: new Date(row.created),
+    modified: new Date(row.modified),
+  };
+}
+
+/**
+ * Model for managing feature flag groups stored in PostgreSQL.
+ *
+ * @example
+ * ```typescript
+ * import { Pool } from "pg";
+ * import { FeatureFlagGroupModel } from "@brandtg/flapjack";
+ *
+ * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+ * const groups = new FeatureFlagGroupModel(pool);
+ * ```
+ */
+export class FeatureFlagGroupModel {
+  private db: Queryable;
+
+  /**
+   * Creates a new FeatureFlagGroupModel instance.
+   *
+   * @param db - A PostgreSQL Pool or Client instance that implements the Queryable interface
+   *
+   * @example
+   * ```typescript
+   * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+   * const model = new FeatureFlagGroupModel(pool);
+   * ```
+   */
+  constructor(db: Queryable) {
+    this.db = db;
+  }
+
+  /**
+   * Creates a new feature flag group in the database.
+   *
+   * @param input - Feature flag group configuration
+   * @param input.name - Unique name for the group (required)
+   * @param input.note - Optional description of the group's purpose
+   * @returns The created group with generated id, created, and modified timestamps
+   *
+   * @throws Will throw an error if a group with the same name already exists
+   *
+   * @example
+   * ```typescript
+   * const group = await model.create({
+   *   name: "billing_redesign",
+   *   note: "All flags related to the new billing flow",
+   * });
+   * ```
+   */
+  async create(input: CreateGroupInput): Promise<FeatureFlagGroup> {
+    const cols: string[] = ["name"];
+    const vals: any[] = [input.name];
+
+    if ("note" in input) {
+      cols.push("note");
+      vals.push(input.note ?? null);
+    }
+
+    const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
+    const sql = `INSERT INTO ${GROUP_TABLE} (${cols.join(", ")}) 
+      VALUES (${placeholders}) 
+      RETURNING ${GROUP_COLUMNS.join(", ")}`;
+    const res = await this.db.query(sql, vals);
+    return mapGroupRow(res.rows[0]);
+  }
+
+  /**
+   * Retrieves a feature flag group by its ID.
+   *
+   * @param id - The group ID
+   * @returns The group if found, null otherwise
+   *
+   * @example
+   * ```typescript
+   * const group = await model.getById(1);
+   * if (group) {
+   *   console.log(group.name);
+   * }
+   * ```
+   */
+  async getById(id: number): Promise<FeatureFlagGroup | null> {
+    const sql = `SELECT ${GROUP_COLUMNS.join(", ")} FROM ${GROUP_TABLE} WHERE id = $1`;
+    const res = await this.db.query(sql, [id]);
+    return res.rows.length > 0 ? mapGroupRow(res.rows[0]) : null;
+  }
+
+  /**
+   * Retrieves a feature flag group by its name.
+   *
+   * @param name - The group name
+   * @returns The group if found, null otherwise
+   *
+   * @example
+   * ```typescript
+   * const group = await model.getByName("billing_redesign");
+   * ```
+   */
+  async getByName(name: string): Promise<FeatureFlagGroup | null> {
+    const sql = `SELECT ${GROUP_COLUMNS.join(", ")} FROM ${GROUP_TABLE} WHERE name = $1`;
+    const res = await this.db.query(sql, [name]);
+    return res.rows.length > 0 ? mapGroupRow(res.rows[0]) : null;
+  }
+
+  /**
+   * Lists all feature flag groups.
+   *
+   * @returns Array of all groups
+   *
+   * @example
+   * ```typescript
+   * const groups = await model.list();
+   * for (const group of groups) {
+   *   console.log(group.name);
+   * }
+   * ```
+   */
+  async list(): Promise<FeatureFlagGroup[]> {
+    const sql = `SELECT ${GROUP_COLUMNS.join(", ")} FROM ${GROUP_TABLE} ORDER BY created DESC`;
+    const res = await this.db.query(sql);
+    return res.rows.map(mapGroupRow);
+  }
+
+  /**
+   * Updates a feature flag group.
+   *
+   * @param id - The group ID to update
+   * @param changes - Fields to update
+   * @returns The updated group if found, null otherwise
+   *
+   * @example
+   * ```typescript
+   * const updated = await model.update(1, {
+   *   note: "Updated description",
+   * });
+   * ```
+   */
+  async update(
+    id: number,
+    changes: UpdateGroupChanges,
+  ): Promise<FeatureFlagGroup | null> {
+    const updates: string[] = [];
+    const vals: any[] = [];
+    let paramIdx = 1;
+
+    if ("name" in changes) {
+      updates.push(`name = $${paramIdx++}`);
+      vals.push(changes.name);
+    }
+    if ("note" in changes) {
+      updates.push(`note = $${paramIdx++}`);
+      vals.push(changes.note ?? null);
+    }
+
+    if (updates.length === 0) {
+      return this.getById(id);
+    }
+
+    vals.push(id);
+    const sql = `UPDATE ${GROUP_TABLE} 
+      SET ${updates.join(", ")} 
+      WHERE id = $${paramIdx} 
+      RETURNING ${GROUP_COLUMNS.join(", ")}`;
+    const res = await this.db.query(sql, vals);
+    return res.rows.length > 0 ? mapGroupRow(res.rows[0]) : null;
+  }
+
+  /**
+   * Deletes a feature flag group and all its member relationships.
+   *
+   * @param id - The group ID to delete
+   * @returns true if deleted, false if not found
+   *
+   * @example
+   * ```typescript
+   * const deleted = await model.delete(1);
+   * ```
+   */
+  async delete(id: number): Promise<boolean> {
+    const res = await this.db.query(
+      `DELETE FROM ${GROUP_TABLE} WHERE id = $1`,
+      [id],
+    );
+    return (res as any).rowCount > 0;
+  }
+
+  /**
+   * Adds a feature flag to a group.
+   *
+   * @param groupId - The group ID
+   * @param featureFlagId - The feature flag ID to add
+   * @returns true if added successfully, false if already exists
+   *
+   * @throws Will throw an error if group or feature flag doesn't exist
+   *
+   * @example
+   * ```typescript
+   * await model.addFeatureFlag(1, 5);
+   * ```
+   */
+  async addFeatureFlag(
+    groupId: number,
+    featureFlagId: number,
+  ): Promise<boolean> {
+    try {
+      const sql = `INSERT INTO ${GROUP_MEMBER_TABLE} (group_id, feature_flag_id) 
+        VALUES ($1, $2)`;
+      await this.db.query(sql, [groupId, featureFlagId]);
+      return true;
+    } catch (err: any) {
+      // If unique constraint violation, return false
+      if (err.code === "23505") {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Removes a feature flag from a group.
+   *
+   * @param groupId - The group ID
+   * @param featureFlagId - The feature flag ID to remove
+   * @returns true if removed, false if relationship didn't exist
+   *
+   * @example
+   * ```typescript
+   * await model.removeFeatureFlag(1, 5);
+   * ```
+   */
+  async removeFeatureFlag(
+    groupId: number,
+    featureFlagId: number,
+  ): Promise<boolean> {
+    const sql = `DELETE FROM ${GROUP_MEMBER_TABLE} 
+      WHERE group_id = $1 AND feature_flag_id = $2`;
+    const res = await this.db.query(sql, [groupId, featureFlagId]);
+    return (res as any).rowCount > 0;
+  }
+
+  /**
+   * Gets all feature flags in a group.
+   *
+   * @param groupId - The group ID
+   * @returns Array of feature flags in the group
+   *
+   * @example
+   * ```typescript
+   * const flags = await model.getFeatureFlags(1);
+   * for (const flag of flags) {
+   *   console.log(flag.name);
+   * }
+   * ```
+   */
+  async getFeatureFlags(groupId: number): Promise<FeatureFlag[]> {
+    const sql = `
+      SELECT ${COLUMNS.map((c) => `f.${c}`).join(", ")}
+      FROM ${TABLE} f
+      INNER JOIN ${GROUP_MEMBER_TABLE} gm ON f.id = gm.feature_flag_id
+      WHERE gm.group_id = $1
+      ORDER BY f.created DESC
+    `;
+    const res = await this.db.query(sql, [groupId]);
+    return res.rows.map(mapRow);
+  }
+
+  /**
+   * Gets all groups that contain a specific feature flag.
+   *
+   * @param featureFlagId - The feature flag ID
+   * @returns Array of groups containing the feature flag
+   *
+   * @example
+   * ```typescript
+   * const groups = await model.getGroupsForFeatureFlag(5);
+   * ```
+   */
+  async getGroupsForFeatureFlag(
+    featureFlagId: number,
+  ): Promise<FeatureFlagGroup[]> {
+    const sql = `
+      SELECT ${GROUP_COLUMNS.map((c) => `g.${c}`).join(", ")}
+      FROM ${GROUP_TABLE} g
+      INNER JOIN ${GROUP_MEMBER_TABLE} gm ON g.id = gm.group_id
+      WHERE gm.feature_flag_id = $1
+      ORDER BY g.created DESC
+    `;
+    const res = await this.db.query(sql, [featureFlagId]);
+    return res.rows.map(mapGroupRow);
+  }
+
+  /**
+   * Updates all feature flags in a group with the same changes.
+   *
+   * @param groupId - The group ID
+   * @param changes - Fields to update (only everyone, percent, roles, groups, users allowed)
+   * @returns The number of feature flags updated
+   *
+   * @example
+   * ```typescript
+   * // Enable all flags in a group for everyone
+   * const count = await model.updateAll(1, { everyone: true });
+   *
+   * // Set percentage rollout for all flags in a group
+   * const count = await model.updateAll(1, { percent: 25 });
+   *
+   * // Add roles to all flags in a group
+   * const count = await model.updateAll(1, { roles: ["admin", "beta"] });
+   * ```
+   */
+  async updateAll(groupId: number, changes: UpdateAllChanges): Promise<number> {
+    const updates: string[] = [];
+    const vals: any[] = [];
+    let paramIdx = 1;
+
+    if ("everyone" in changes) {
+      updates.push(`everyone = $${paramIdx++}`);
+      vals.push(changes.everyone ?? null);
+    }
+    if ("percent" in changes) {
+      updates.push(`percent = $${paramIdx++}`);
+      vals.push(changes.percent ?? null);
+    }
+    if ("roles" in changes) {
+      updates.push(`roles = $${paramIdx++}`);
+      vals.push(changes.roles ?? null);
+    }
+    if ("groups" in changes) {
+      updates.push(`groups = $${paramIdx++}`);
+      vals.push(changes.groups ?? null);
+    }
+    if ("users" in changes) {
+      updates.push(`users = $${paramIdx++}`);
+      vals.push(changes.users ?? null);
+    }
+
+    if (updates.length === 0) {
+      return 0;
+    }
+
+    vals.push(groupId);
+    const sql = `
+      UPDATE ${TABLE} 
+      SET ${updates.join(", ")}
+      WHERE id IN (
+        SELECT feature_flag_id 
+        FROM ${GROUP_MEMBER_TABLE}
+        WHERE group_id = $${paramIdx}
+      )
+    `;
+    const res = await this.db.query(sql, vals);
+    return (res as any).rowCount;
   }
 }

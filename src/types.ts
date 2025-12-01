@@ -46,3 +46,19 @@ export type ExpiredFeatureFlagEventHandler = ({
 export type FeatureFlagEventHandlers = {
   onExpired?: ExpiredFeatureFlagEventHandler;
 };
+
+/**
+ * Represents a feature flag group used to manage multiple feature flags together.
+ */
+export type FeatureFlagGroup = {
+  /** Unique identifier for the feature flag group */
+  id: number;
+  /** Human readable name of the feature flag group */
+  name: string;
+  /** Description of what this group is for */
+  note?: string;
+  /** Date when the group was created */
+  created: Date;
+  /** Date when the group was last modified */
+  modified: Date;
+};
