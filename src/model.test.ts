@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { Pool } from "pg";
-import { FeatureFlagModel } from "./model.js";
+import { FeatureFlagModel, FeatureFlagGroupModel } from "./model.js";
 import { runMigrations } from "./migrate.js";
 
 const DB_CONFIG = {
@@ -188,6 +188,103 @@ describe("FeatureFlagModel", () => {
       expect(retrieved).not.toBeNull();
       expect(retrieved!.expires).toBeInstanceOf(Date);
       expect(retrieved!.expires?.toISOString()).toBe(expiresDate.toISOString());
+    });
+  });
+
+  describe("getMany", () => {
+    it("should retrieve multiple feature flags by ids", async () => {
+      const flag1 = await model.create({ name: "get-many-1", everyone: true });
+      const flag2 = await model.create({ name: "get-many-2", percent: 50 });
+      const flag3 = await model.create({
+        name: "get-many-3",
+        roles: ["admin"],
+      });
+
+      const flags = await model.getMany([flag1.id, flag2.id, flag3.id]);
+
+      expect(flags).toHaveLength(3);
+      const ids = flags.map((f) => f.id);
+      expect(ids).toContain(flag1.id);
+      expect(ids).toContain(flag2.id);
+      expect(ids).toContain(flag3.id);
+
+      const retrievedFlag1 = flags.find((f) => f.id === flag1.id);
+      const retrievedFlag2 = flags.find((f) => f.id === flag2.id);
+      const retrievedFlag3 = flags.find((f) => f.id === flag3.id);
+
+      expect(retrievedFlag1?.everyone).toBe(true);
+      expect(retrievedFlag2?.percent).toBe(50);
+      expect(retrievedFlag3?.roles).toEqual(["admin"]);
+    });
+
+    it("should return empty array for empty input", async () => {
+      const flags = await model.getMany([]);
+      expect(flags).toHaveLength(0);
+    });
+
+    it("should return only existing flags when some ids don't exist", async () => {
+      const flag1 = await model.create({ name: "get-many-partial-1" });
+      const flag2 = await model.create({ name: "get-many-partial-2" });
+
+      const flags = await model.getMany([flag1.id, 999999, flag2.id, 888888]);
+
+      expect(flags).toHaveLength(2);
+      const ids = flags.map((f) => f.id);
+      expect(ids).toContain(flag1.id);
+      expect(ids).toContain(flag2.id);
+      expect(ids).not.toContain(999999);
+      expect(ids).not.toContain(888888);
+    });
+
+    it("should return empty array when no ids exist", async () => {
+      const flags = await model.getMany([999999, 888888, 777777]);
+      expect(flags).toHaveLength(0);
+    });
+
+    it("should handle single id", async () => {
+      const flag = await model.create({ name: "get-many-single" });
+      const flags = await model.getMany([flag.id]);
+
+      expect(flags).toHaveLength(1);
+      expect(flags[0].id).toBe(flag.id);
+      expect(flags[0].name).toBe("get-many-single");
+    });
+
+    it("should retrieve flags with all properties intact", async () => {
+      const expiresDate = new Date("2026-12-31T23:59:59Z");
+      const flag = await model.create({
+        name: "get-many-all-props",
+        everyone: true,
+        percent: 75.5,
+        roles: ["admin", "moderator"],
+        groups: ["beta"],
+        users: ["user123"],
+        note: "Test flag",
+        expires: expiresDate,
+      });
+
+      const flags = await model.getMany([flag.id]);
+
+      expect(flags).toHaveLength(1);
+      expect(flags[0].everyone).toBe(true);
+      expect(flags[0].percent).toBe(75.5);
+      expect(flags[0].roles).toEqual(["admin", "moderator"]);
+      expect(flags[0].groups).toEqual(["beta"]);
+      expect(flags[0].users).toEqual(["user123"]);
+      expect(flags[0].note).toBe("Test flag");
+      expect(flags[0].expires).toBeInstanceOf(Date);
+      expect(flags[0].expires?.toISOString()).toBe(expiresDate.toISOString());
+    });
+
+    it("should handle duplicate ids in input", async () => {
+      const flag = await model.create({ name: "get-many-duplicates" });
+      const flags = await model.getMany([flag.id, flag.id, flag.id]);
+
+      // Should return each flag once, even if ID appears multiple times
+      expect(flags.length).toBeGreaterThan(0);
+      flags.forEach((f) => {
+        expect(f.id).toBe(flag.id);
+      });
     });
   });
 
@@ -1076,6 +1173,612 @@ describe("FeatureFlagModel", () => {
       expect(callLog).toEqual(["expired-flag-1", "expired-flag-2"]);
       expect(isActive1).toBe(false); // Handler returned false
       expect(isActive2).toBe(true); // Handler returned undefined, everyone is true
+    });
+  });
+});
+
+describe("FeatureFlagGroupModel", () => {
+  let testPool: Pool;
+  let groupModel: FeatureFlagGroupModel;
+  let flagModel: FeatureFlagModel;
+
+  beforeAll(async () => {
+    const setupPool = new Pool({
+      ...DB_CONFIG,
+      database: "postgres",
+    });
+
+    try {
+      await setupPool.query(`DROP DATABASE IF EXISTS flapjack_group_test`);
+      await setupPool.query(`CREATE DATABASE flapjack_group_test`);
+    } finally {
+      await setupPool.end();
+    }
+
+    testPool = new Pool({
+      ...DB_CONFIG,
+      database: "flapjack_group_test",
+    });
+
+    await runMigrations({
+      databaseUrl: `postgres://${DB_CONFIG.user}:${DB_CONFIG.password}@${DB_CONFIG.host}:${DB_CONFIG.port}/flapjack_group_test`,
+      migrationsTable: "pgmigrations",
+    });
+
+    groupModel = new FeatureFlagGroupModel(testPool);
+    flagModel = new FeatureFlagModel(testPool);
+  });
+
+  afterAll(async () => {
+    await testPool.end();
+
+    const cleanupPool = new Pool({
+      ...DB_CONFIG,
+      database: "postgres",
+    });
+
+    try {
+      await cleanupPool.query(`DROP DATABASE IF EXISTS flapjack_group_test`);
+    } finally {
+      await cleanupPool.end();
+    }
+  });
+
+  describe("create", () => {
+    it("should create a group with minimal data", async () => {
+      const group = await groupModel.create({ name: "test-group-minimal" });
+
+      expect(group.id).toBeTypeOf("number");
+      expect(group.name).toBe("test-group-minimal");
+      expect(group.note).toBeUndefined();
+      expect(group.created).toBeInstanceOf(Date);
+      expect(group.modified).toBeInstanceOf(Date);
+    });
+
+    it("should create a group with all properties", async () => {
+      const group = await groupModel.create({
+        name: "test-group-complete",
+        note: "A group for testing purposes",
+      });
+
+      expect(group.id).toBeTypeOf("number");
+      expect(group.name).toBe("test-group-complete");
+      expect(group.note).toBe("A group for testing purposes");
+      expect(group.created).toBeInstanceOf(Date);
+      expect(group.modified).toBeInstanceOf(Date);
+    });
+
+    it("should throw error for duplicate group name", async () => {
+      await groupModel.create({ name: "duplicate-group" });
+      await expect(
+        groupModel.create({ name: "duplicate-group" }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("getById", () => {
+    it("should retrieve a group by id", async () => {
+      const created = await groupModel.create({ name: "test-get-by-id" });
+      const retrieved = await groupModel.getById(created.id);
+
+      expect(retrieved).not.toBeNull();
+      expect(retrieved!.id).toBe(created.id);
+      expect(retrieved!.name).toBe("test-get-by-id");
+    });
+
+    it("should return null for non-existent id", async () => {
+      const retrieved = await groupModel.getById(999999);
+      expect(retrieved).toBeNull();
+    });
+  });
+
+  describe("getByName", () => {
+    it("should retrieve a group by name", async () => {
+      await groupModel.create({ name: "test-get-by-name", note: "Test note" });
+      const retrieved = await groupModel.getByName("test-get-by-name");
+
+      expect(retrieved).not.toBeNull();
+      expect(retrieved!.name).toBe("test-get-by-name");
+      expect(retrieved!.note).toBe("Test note");
+    });
+
+    it("should return null for non-existent name", async () => {
+      const retrieved = await groupModel.getByName("non-existent-group");
+      expect(retrieved).toBeNull();
+    });
+  });
+
+  describe("list", () => {
+    it("should list all groups", async () => {
+      await groupModel.create({ name: "list-test-1" });
+      await groupModel.create({ name: "list-test-2" });
+      await groupModel.create({ name: "list-test-3" });
+
+      const groups = await groupModel.list();
+
+      expect(groups.length).toBeGreaterThanOrEqual(3);
+      const names = groups.map((g) => g.name);
+      expect(names).toContain("list-test-1");
+      expect(names).toContain("list-test-2");
+      expect(names).toContain("list-test-3");
+    });
+
+    it("should return groups in descending order by created date", async () => {
+      const groups = await groupModel.list();
+
+      for (let i = 1; i < groups.length; i++) {
+        expect(groups[i - 1].created.getTime()).toBeGreaterThanOrEqual(
+          groups[i].created.getTime(),
+        );
+      }
+    });
+  });
+
+  describe("update", () => {
+    it("should update group name", async () => {
+      const created = await groupModel.create({ name: "update-test-name" });
+      const updated = await groupModel.update(created.id, {
+        name: "updated-name",
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.name).toBe("updated-name");
+      expect(updated!.modified.getTime()).toBeGreaterThan(
+        created.modified.getTime(),
+      );
+    });
+
+    it("should update group note", async () => {
+      const created = await groupModel.create({
+        name: "update-test-note",
+        note: "Original",
+      });
+      const updated = await groupModel.update(created.id, {
+        note: "Updated note",
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.note).toBe("Updated note");
+    });
+
+    it("should update multiple fields", async () => {
+      const created = await groupModel.create({ name: "update-test-multi" });
+      const updated = await groupModel.update(created.id, {
+        name: "new-name",
+        note: "New note",
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.name).toBe("new-name");
+      expect(updated!.note).toBe("New note");
+    });
+
+    it("should return null for non-existent group", async () => {
+      const updated = await groupModel.update(999999, {
+        name: "does-not-exist",
+      });
+      expect(updated).toBeNull();
+    });
+
+    it("should return unchanged group if no changes provided", async () => {
+      const created = await groupModel.create({
+        name: "update-test-no-changes",
+      });
+      const updated = await groupModel.update(created.id, {});
+
+      expect(updated).not.toBeNull();
+      expect(updated!.id).toBe(created.id);
+      expect(updated!.name).toBe(created.name);
+    });
+  });
+
+  describe("delete", () => {
+    it("should delete a group", async () => {
+      const created = await groupModel.create({ name: "delete-test" });
+      const deleted = await groupModel.delete(created.id);
+
+      expect(deleted).toBe(true);
+
+      const retrieved = await groupModel.getById(created.id);
+      expect(retrieved).toBeNull();
+    });
+
+    it("should return false for non-existent group", async () => {
+      const deleted = await groupModel.delete(999999);
+      expect(deleted).toBe(false);
+    });
+
+    it("should cascade delete group members", async () => {
+      const group = await groupModel.create({ name: "delete-cascade-test" });
+      const flag = await flagModel.create({ name: "delete-cascade-flag" });
+
+      await groupModel.addFeatureFlag(group.id, flag.id);
+
+      const deleted = await groupModel.delete(group.id);
+      expect(deleted).toBe(true);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      expect(flags).toHaveLength(0);
+    });
+  });
+
+  describe("addFeatureFlag", () => {
+    it("should add a feature flag to a group", async () => {
+      const group = await groupModel.create({ name: "add-flag-test" });
+      const flag = await flagModel.create({ name: "add-flag-test-flag" });
+
+      const added = await groupModel.addFeatureFlag(group.id, flag.id);
+      expect(added).toBe(true);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      expect(flags).toHaveLength(1);
+      expect(flags[0].id).toBe(flag.id);
+    });
+
+    it("should return false when adding duplicate flag", async () => {
+      const group = await groupModel.create({
+        name: "add-flag-duplicate-test",
+      });
+      const flag = await flagModel.create({ name: "add-flag-duplicate-flag" });
+
+      await groupModel.addFeatureFlag(group.id, flag.id);
+      const added = await groupModel.addFeatureFlag(group.id, flag.id);
+
+      expect(added).toBe(false);
+    });
+
+    it("should throw error for non-existent group", async () => {
+      const flag = await flagModel.create({ name: "add-flag-no-group" });
+      await expect(
+        groupModel.addFeatureFlag(999999, flag.id),
+      ).rejects.toThrow();
+    });
+
+    it("should throw error for non-existent flag", async () => {
+      const group = await groupModel.create({ name: "add-flag-no-flag" });
+      await expect(
+        groupModel.addFeatureFlag(group.id, 999999),
+      ).rejects.toThrow();
+    });
+
+    it("should add multiple flags to a group", async () => {
+      const group = await groupModel.create({ name: "add-multiple-flags" });
+      const flag1 = await flagModel.create({ name: "multi-flag-1" });
+      const flag2 = await flagModel.create({ name: "multi-flag-2" });
+      const flag3 = await flagModel.create({ name: "multi-flag-3" });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+      await groupModel.addFeatureFlag(group.id, flag3.id);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      expect(flags).toHaveLength(3);
+      const ids = flags.map((f) => f.id);
+      expect(ids).toContain(flag1.id);
+      expect(ids).toContain(flag2.id);
+      expect(ids).toContain(flag3.id);
+    });
+  });
+
+  describe("removeFeatureFlag", () => {
+    it("should remove a feature flag from a group", async () => {
+      const group = await groupModel.create({ name: "remove-flag-test" });
+      const flag = await flagModel.create({ name: "remove-flag-test-flag" });
+
+      await groupModel.addFeatureFlag(group.id, flag.id);
+      const removed = await groupModel.removeFeatureFlag(group.id, flag.id);
+
+      expect(removed).toBe(true);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      expect(flags).toHaveLength(0);
+    });
+
+    it("should return false when removing non-existent relationship", async () => {
+      const group = await groupModel.create({ name: "remove-flag-no-rel" });
+      const flag = await flagModel.create({ name: "remove-flag-no-rel-flag" });
+
+      const removed = await groupModel.removeFeatureFlag(group.id, flag.id);
+      expect(removed).toBe(false);
+    });
+
+    it("should only remove specified flag from group", async () => {
+      const group = await groupModel.create({ name: "remove-one-flag" });
+      const flag1 = await flagModel.create({ name: "remove-one-flag-1" });
+      const flag2 = await flagModel.create({ name: "remove-one-flag-2" });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+
+      await groupModel.removeFeatureFlag(group.id, flag1.id);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      expect(flags).toHaveLength(1);
+      expect(flags[0].id).toBe(flag2.id);
+    });
+  });
+
+  describe("getFeatureFlags", () => {
+    it("should return empty array for group with no flags", async () => {
+      const group = await groupModel.create({ name: "get-flags-empty" });
+      const flags = await groupModel.getFeatureFlags(group.id);
+      expect(flags).toHaveLength(0);
+    });
+
+    it("should return all flags in a group", async () => {
+      const group = await groupModel.create({ name: "get-all-flags" });
+      const flag1 = await flagModel.create({
+        name: "get-all-flags-1",
+        everyone: true,
+      });
+      const flag2 = await flagModel.create({
+        name: "get-all-flags-2",
+        percent: 50,
+      });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      expect(flags).toHaveLength(2);
+
+      const flag1Retrieved = flags.find((f) => f.id === flag1.id);
+      const flag2Retrieved = flags.find((f) => f.id === flag2.id);
+
+      expect(flag1Retrieved?.everyone).toBe(true);
+      expect(flag2Retrieved?.percent).toBe(50);
+    });
+
+    it("should return flags ordered by created date descending", async () => {
+      const group = await groupModel.create({ name: "get-flags-ordered" });
+      const flag1 = await flagModel.create({ name: "ordered-flag-1" });
+      const flag2 = await flagModel.create({ name: "ordered-flag-2" });
+      const flag3 = await flagModel.create({ name: "ordered-flag-3" });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+      await groupModel.addFeatureFlag(group.id, flag3.id);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+
+      for (let i = 1; i < flags.length; i++) {
+        expect(flags[i - 1].created.getTime()).toBeGreaterThanOrEqual(
+          flags[i].created.getTime(),
+        );
+      }
+    });
+  });
+
+  describe("getGroupsForFeatureFlag", () => {
+    it("should return empty array for flag in no groups", async () => {
+      const flag = await flagModel.create({ name: "flag-no-groups" });
+      const groups = await groupModel.getGroupsForFeatureFlag(flag.id);
+      expect(groups).toHaveLength(0);
+    });
+
+    it("should return all groups containing a flag", async () => {
+      const flag = await flagModel.create({ name: "flag-multiple-groups" });
+      const group1 = await groupModel.create({ name: "group-for-flag-1" });
+      const group2 = await groupModel.create({ name: "group-for-flag-2" });
+      const group3 = await groupModel.create({ name: "group-for-flag-3" });
+
+      await groupModel.addFeatureFlag(group1.id, flag.id);
+      await groupModel.addFeatureFlag(group2.id, flag.id);
+      await groupModel.addFeatureFlag(group3.id, flag.id);
+
+      const groups = await groupModel.getGroupsForFeatureFlag(flag.id);
+      expect(groups).toHaveLength(3);
+
+      const ids = groups.map((g) => g.id);
+      expect(ids).toContain(group1.id);
+      expect(ids).toContain(group2.id);
+      expect(ids).toContain(group3.id);
+    });
+
+    it("should return groups ordered by created date descending", async () => {
+      const flag = await flagModel.create({ name: "flag-groups-ordered" });
+      const group1 = await groupModel.create({ name: "ordered-group-1" });
+      const group2 = await groupModel.create({ name: "ordered-group-2" });
+
+      await groupModel.addFeatureFlag(group1.id, flag.id);
+      await groupModel.addFeatureFlag(group2.id, flag.id);
+
+      const groups = await groupModel.getGroupsForFeatureFlag(flag.id);
+
+      for (let i = 1; i < groups.length; i++) {
+        expect(groups[i - 1].created.getTime()).toBeGreaterThanOrEqual(
+          groups[i].created.getTime(),
+        );
+      }
+    });
+  });
+
+  describe("updateAll", () => {
+    it("should update everyone field for all flags in group", async () => {
+      const group = await groupModel.create({ name: "update-all-everyone" });
+      const flag1 = await flagModel.create({
+        name: "update-all-everyone-1",
+        everyone: false,
+      });
+      const flag2 = await flagModel.create({
+        name: "update-all-everyone-2",
+        everyone: null,
+      });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+
+      const count = await groupModel.updateAll(group.id, { everyone: true });
+      expect(count).toBe(2);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      expect(flags[0].everyone).toBe(true);
+      expect(flags[1].everyone).toBe(true);
+    });
+
+    it("should update percent field for all flags in group", async () => {
+      const group = await groupModel.create({ name: "update-all-percent" });
+      const flag1 = await flagModel.create({ name: "update-all-percent-1" });
+      const flag2 = await flagModel.create({
+        name: "update-all-percent-2",
+        percent: 10,
+      });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+
+      const count = await groupModel.updateAll(group.id, { percent: 25.5 });
+      expect(count).toBe(2);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      flags.forEach((flag) => {
+        expect(flag.percent).toBe(25.5);
+      });
+    });
+
+    it("should update roles field for all flags in group", async () => {
+      const group = await groupModel.create({ name: "update-all-roles" });
+      const flag1 = await flagModel.create({ name: "update-all-roles-1" });
+      const flag2 = await flagModel.create({
+        name: "update-all-roles-2",
+        roles: ["user"],
+      });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+
+      const count = await groupModel.updateAll(group.id, {
+        roles: ["admin", "moderator"],
+      });
+      expect(count).toBe(2);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      flags.forEach((flag) => {
+        expect(flag.roles).toEqual(["admin", "moderator"]);
+      });
+    });
+
+    it("should update groups field for all flags in group", async () => {
+      const group = await groupModel.create({ name: "update-all-groups" });
+      const flag1 = await flagModel.create({ name: "update-all-groups-1" });
+      const flag2 = await flagModel.create({ name: "update-all-groups-2" });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+
+      const count = await groupModel.updateAll(group.id, {
+        groups: ["beta", "vip"],
+      });
+      expect(count).toBe(2);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      flags.forEach((flag) => {
+        expect(flag.groups).toEqual(["beta", "vip"]);
+      });
+    });
+
+    it("should update users field for all flags in group", async () => {
+      const group = await groupModel.create({ name: "update-all-users" });
+      const flag1 = await flagModel.create({ name: "update-all-users-1" });
+      const flag2 = await flagModel.create({ name: "update-all-users-2" });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+
+      const count = await groupModel.updateAll(group.id, {
+        users: ["user1", "user2"],
+      });
+      expect(count).toBe(2);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      flags.forEach((flag) => {
+        expect(flag.users).toEqual(["user1", "user2"]);
+      });
+    });
+
+    it("should update multiple fields at once", async () => {
+      const group = await groupModel.create({ name: "update-all-multi" });
+      const flag1 = await flagModel.create({ name: "update-all-multi-1" });
+      const flag2 = await flagModel.create({ name: "update-all-multi-2" });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+      await groupModel.addFeatureFlag(group.id, flag2.id);
+
+      const count = await groupModel.updateAll(group.id, {
+        everyone: true,
+        percent: 50,
+        roles: ["admin"],
+      });
+      expect(count).toBe(2);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      flags.forEach((flag) => {
+        expect(flag.everyone).toBe(true);
+        expect(flag.percent).toBe(50);
+        expect(flag.roles).toEqual(["admin"]);
+      });
+    });
+
+    it("should return 0 for group with no flags", async () => {
+      const group = await groupModel.create({ name: "update-all-empty" });
+      const count = await groupModel.updateAll(group.id, { everyone: true });
+      expect(count).toBe(0);
+    });
+
+    it("should return 0 when no changes provided", async () => {
+      const group = await groupModel.create({ name: "update-all-no-changes" });
+      const flag = await flagModel.create({
+        name: "update-all-no-changes-flag",
+      });
+      await groupModel.addFeatureFlag(group.id, flag.id);
+
+      const count = await groupModel.updateAll(group.id, {});
+      expect(count).toBe(0);
+    });
+
+    it("should not affect flags outside the group", async () => {
+      const group = await groupModel.create({ name: "update-all-isolation" });
+      const flag1 = await flagModel.create({
+        name: "update-all-isolation-in",
+        everyone: false,
+      });
+      const flag2 = await flagModel.create({
+        name: "update-all-isolation-out",
+        everyone: false,
+      });
+
+      await groupModel.addFeatureFlag(group.id, flag1.id);
+
+      await groupModel.updateAll(group.id, { everyone: true });
+
+      const flag1Updated = await flagModel.getById(flag1.id);
+      const flag2Updated = await flagModel.getById(flag2.id);
+
+      expect(flag1Updated!.everyone).toBe(true);
+      expect(flag2Updated!.everyone).toBe(false);
+    });
+
+    it("should handle setting fields to null", async () => {
+      const group = await groupModel.create({ name: "update-all-null" });
+      const flag = await flagModel.create({
+        name: "update-all-null-flag",
+        everyone: true,
+        percent: 50,
+        roles: ["admin"],
+      });
+
+      await groupModel.addFeatureFlag(group.id, flag.id);
+
+      await groupModel.updateAll(group.id, {
+        everyone: undefined,
+        percent: undefined,
+        roles: undefined,
+      });
+
+      const updated = await flagModel.getById(flag.id);
+      expect(updated!.everyone).toBeUndefined();
+      expect(updated!.percent).toBeUndefined();
+      expect(updated!.roles).toBeUndefined();
     });
   });
 });
