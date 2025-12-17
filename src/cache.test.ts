@@ -9,35 +9,35 @@ describe("InMemoryCache", () => {
     cache = new InMemoryCache<string>();
   });
 
-  it("should store and retrieve values", () => {
-    cache.set("key1", "value1");
-    expect(cache.get("key1")).toBe("value1");
+  it("should store and retrieve values", async () => {
+    await cache.set("key1", "value1");
+    expect(await cache.get("key1")).toBe("value1");
   });
 
-  it("should return undefined for non-existent keys", () => {
-    expect(cache.get("nonexistent")).toBeUndefined();
+  it("should return undefined for non-existent keys", async () => {
+    expect(await cache.get("nonexistent")).toBeUndefined();
   });
 
   it("should expire entries after TTL", async () => {
-    cache.set("key1", "value1", 0.1); // 100ms TTL
-    expect(cache.get("key1")).toBe("value1");
+    await cache.set("key1", "value1", 0.1); // 100ms TTL
+    expect(await cache.get("key1")).toBe("value1");
 
     // Wait for expiration
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(cache.get("key1")).toBeUndefined();
+    expect(await cache.get("key1")).toBeUndefined();
   });
 
-  it("should delete entries", () => {
-    cache.set("key1", "value1");
-    expect(cache.get("key1")).toBe("value1");
+  it("should delete entries", async () => {
+    await cache.set("key1", "value1");
+    expect(await cache.get("key1")).toBe("value1");
 
     cache.delete("key1");
-    expect(cache.get("key1")).toBeUndefined();
+    expect(await cache.get("key1")).toBeUndefined();
   });
 
   it("should clear expired entries", async () => {
-    cache.set("key1", "value1", 0.1); // 100ms TTL
-    cache.set("key2", "value2", 1); // 1 second TTL
+    await cache.set("key1", "value1", 0.1); // 100ms TTL
+    await cache.set("key2", "value2", 1); // 1 second TTL
 
     expect(cache.size()).toBe(2);
 
@@ -48,25 +48,25 @@ describe("InMemoryCache", () => {
     expect(cache.size()).toBe(2);
 
     // Access expired key should clean it up
-    expect(cache.get("key1")).toBeUndefined();
+    expect(await cache.get("key1")).toBeUndefined();
     expect(cache.size()).toBe(1);
 
     // Manual cleanup should work too
     cache.clearExpired();
     expect(cache.size()).toBe(1);
-    expect(cache.get("key2")).toBe("value2");
+    expect(await cache.get("key2")).toBe("value2");
   });
 
-  it("should clear all entries", () => {
-    cache.set("key1", "value1");
-    cache.set("key2", "value2");
+  it("should clear all entries", async () => {
+    await cache.set("key1", "value1");
+    await cache.set("key2", "value2");
 
     expect(cache.size()).toBe(2);
 
     cache.clear();
     expect(cache.size()).toBe(0);
-    expect(cache.get("key1")).toBeUndefined();
-    expect(cache.get("key2")).toBeUndefined();
+    expect(await cache.get("key1")).toBeUndefined();
+    expect(await cache.get("key2")).toBeUndefined();
   });
 });
 
