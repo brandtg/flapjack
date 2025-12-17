@@ -9,9 +9,12 @@ export const shorthands = undefined;
  * @returns {Promise<void> | void}
  */
 export const up = (pgm) => {
-  pgm.addColumn("flapjack_feature_flag", {
-    expires: { type: "timestamptz" },
-  });
+  pgm.addColumn(
+    { schema: "flapjack", name: "feature_flag" },
+    {
+      expires: { type: "timestamptz" },
+    },
+  );
 };
 
 /**
@@ -20,5 +23,5 @@ export const up = (pgm) => {
  * @returns {Promise<void> | void}
  */
 export const down = (pgm) => {
-  pgm.dropColumn("flapjack_feature_flag", "expires");
+  pgm.dropColumn({ schema: "flapjack", name: "feature_flag" }, "expires");
 };

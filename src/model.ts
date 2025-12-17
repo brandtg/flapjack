@@ -11,7 +11,7 @@ interface Queryable {
   query: (text: string, params?: any[]) => Promise<QueryResult>;
 }
 
-const TABLE = "flapjack_feature_flag";
+const TABLE = "flapjack.feature_flag";
 
 const COLUMNS = [
   "id",
@@ -467,8 +467,8 @@ export class FeatureFlagModel {
   }
 }
 
-const GROUP_TABLE = "flapjack_feature_flag_group";
-const GROUP_MEMBER_TABLE = "flapjack_feature_flag_group_member";
+const GROUP_TABLE = "flapjack.feature_flag_group";
+const GROUP_MEMBER_TABLE = "flapjack.feature_flag_group_member";
 
 const GROUP_COLUMNS = ["id", "name", "note", "created", "modified"] as const;
 
