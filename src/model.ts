@@ -608,6 +608,28 @@ export class FeatureFlagModel {
 
     return result;
   }
+
+  /**
+   * Gets the latest modified timestamp across all feature flags.
+   *
+   * @returns The latest modified timestamp in milliseconds since epoch, or -1 if the table is empty
+   *
+   * @example
+   * ```typescript
+   * const lastModified = await model.getLastModified();
+   * if (lastModified === -1) {
+   *   console.log("No feature flags exist");
+   * } else {
+   *   console.log(`Last modified: ${new Date(lastModified)}`);
+   * }
+   * ```
+   */
+  async getLastModified(): Promise<number> {
+    const sql = `SELECT MAX(modified) as max_modified FROM ${TABLE}`;
+    const res = await this.db.query(sql);
+    const maxModified = res.rows[0]?.max_modified;
+    return maxModified ? new Date(maxModified).getTime() : -1;
+  }
 }
 
 const GROUP_TABLE = "flapjack.feature_flag_group";

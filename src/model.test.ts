@@ -468,6 +468,59 @@ describe("FeatureFlagModel", () => {
     });
   });
 
+  describe("getLastModified", () => {
+    it("should return -1 when table is empty", async () => {
+      // Clean up all existing flags first
+      const allFlags = await model.list();
+      for (const flag of allFlags) {
+        await model.delete(flag.id);
+      }
+
+      const latest = await model.getLastModified();
+      expect(latest).toBe(-1);
+    });
+
+    it("should return the latest modified timestamp", async () => {
+      const flag1 = await model.create({ name: "latest-test-1" });
+      const timestamp1 = flag1.modified.getTime();
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const flag2 = await model.create({ name: "latest-test-2" });
+      const timestamp2 = flag2.modified.getTime();
+
+      const latest = await model.getLastModified();
+      expect(latest).toBe(timestamp2);
+      expect(latest).toBeGreaterThan(timestamp1);
+    });
+
+    it("should return updated timestamp after modification", async () => {
+      const flag = await model.create({ name: "latest-test-modify" });
+      const initialTimestamp = flag.modified.getTime();
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await model.update(flag.id, { everyone: true });
+
+      const latest = await model.getLastModified();
+      expect(latest).toBeGreaterThan(initialTimestamp);
+    });
+
+    it("should return the max timestamp among multiple flags", async () => {
+      const flag1 = await model.create({ name: "latest-test-multi-1" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const flag2 = await model.create({ name: "latest-test-multi-2" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const flag3 = await model.create({ name: "latest-test-multi-3" });
+      const expectedLatest = flag3.modified.getTime();
+
+      const latest = await model.getLastModified();
+      expect(latest).toBe(expectedLatest);
+    });
+  });
+
   describe("hashUserId", () => {
     it("should return consistent hash for same user id", async () => {
       const hash1 = await model.hashUserId("user123");
