@@ -1,11 +1,10 @@
-import { FeatureFlagEventHandlers } from "types.js";
 import { FeatureFlagModel } from "./model.js";
 import MurmurHash3 from "imurmurhash";
 
 export interface Cache<T> {
-  get(key: string): T | undefined;
-  set(key: string, value: T, ttl?: number): void;
-  delete(key: string): void;
+  get(key: string): Promise<T | undefined>;
+  set(key: string, value: T, ttl?: number): Promise<void>;
+  delete(key: string): Promise<void>;
 }
 
 interface CacheEntry<T> {
@@ -21,7 +20,7 @@ const DEFAULT_TTL = 60 * 5; // 5 minutes
 export class InMemoryCache<T> implements Cache<T> {
   private cache = new Map<string, CacheEntry<T>>();
 
-  get(key: string): T | undefined {
+  async get(key: string): Promise<T | undefined> {
     const entry = this.cache.get(key);
     if (!entry) {
       return undefined;
@@ -37,12 +36,12 @@ export class InMemoryCache<T> implements Cache<T> {
     return entry.value;
   }
 
-  set(key: string, value: T, ttl?: number): void {
+  async set(key: string, value: T, ttl?: number): Promise<void> {
     const expiresAt = ttl !== undefined ? Date.now() + ttl * 1000 : undefined;
     this.cache.set(key, { value, expiresAt });
   }
 
-  delete(key: string): void {
+  async delete(key: string): Promise<void> {
     this.cache.delete(key);
   }
 
@@ -135,7 +134,7 @@ export class FeatureFlagCache {
     const cacheKey = this.generateCacheKey({ name, user, roles, groups });
 
     // Try to get from cache first
-    const cachedResult = this.cache.get(cacheKey);
+    const cachedResult = await this.cache.get(cacheKey);
     if (cachedResult !== undefined) {
       return cachedResult;
     }

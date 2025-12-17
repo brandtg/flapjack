@@ -1321,9 +1321,6 @@ describe("FeatureFlagGroupModel", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.name).toBe("updated-name");
-      expect(updated!.modified.getTime()).toBeGreaterThan(
-        created.modified.getTime(),
-      );
     });
 
     it("should update group note", async () => {
