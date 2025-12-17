@@ -97,7 +97,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
 ### SQLite Schema
 
 ```sql
-CREATE TABLE flapjack_feature_flag (
+CREATE TABLE feature_flag (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   everyone INTEGER, -- 0, 1, or NULL
@@ -111,11 +111,11 @@ CREATE TABLE flapjack_feature_flag (
 );
 
 -- Trigger to update modified timestamp
-CREATE TRIGGER flapjack_feature_flag_set_modified
-AFTER UPDATE ON flapjack_feature_flag
+CREATE TRIGGER feature_flag_set_modified
+AFTER UPDATE ON feature_flag
 FOR EACH ROW
 BEGIN
-  UPDATE flapjack_feature_flag 
+  UPDATE feature_flag 
   SET modified = datetime('now') 
   WHERE id = NEW.id;
 END;

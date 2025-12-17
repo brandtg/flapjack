@@ -40,7 +40,6 @@ describe("FeatureFlagModel", () => {
     // Run the migrations to create the schema
     await runMigrations({
       databaseUrl: `postgres://${DB_CONFIG.user}:${DB_CONFIG.password}@${DB_CONFIG.host}:${DB_CONFIG.port}/${TEST_DB_NAME}`,
-      migrationsTable: "pgmigrations",
     });
 
     model = new FeatureFlagModel(testPool);
@@ -1202,7 +1201,6 @@ describe("FeatureFlagGroupModel", () => {
 
     await runMigrations({
       databaseUrl: `postgres://${DB_CONFIG.user}:${DB_CONFIG.password}@${DB_CONFIG.host}:${DB_CONFIG.port}/flapjack_group_test`,
-      migrationsTable: "pgmigrations",
     });
 
     groupModel = new FeatureFlagGroupModel(testPool);

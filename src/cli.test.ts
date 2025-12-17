@@ -53,7 +53,6 @@ describe("CLI smoke", () => {
 
     await runMigrations({
       databaseUrl: TEST_DB_URL,
-      migrationsTable: "pgmigrations",
     });
   });
 
