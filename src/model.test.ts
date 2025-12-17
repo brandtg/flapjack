@@ -1174,6 +1174,318 @@ describe("FeatureFlagModel", () => {
       expect(isActive2).toBe(true); // Handler returned undefined, everyone is true
     });
   });
+
+  describe("getManyByName", () => {
+    it("should retrieve multiple flags by name", async () => {
+      await model.create({ name: "name-flag1", everyone: true });
+      await model.create({ name: "name-flag2", everyone: false });
+      await model.create({ name: "name-flag3", roles: ["admin"] });
+
+      const flags = await model.getManyByName([
+        "name-flag1",
+        "name-flag2",
+        "name-flag3",
+      ]);
+
+      expect(flags).toHaveLength(3);
+      expect(flags.map((f) => f.name).sort()).toEqual([
+        "name-flag1",
+        "name-flag2",
+        "name-flag3",
+      ]);
+    });
+
+    it("should return empty array for empty input", async () => {
+      const flags = await model.getManyByName([]);
+      expect(flags).toEqual([]);
+    });
+
+    it("should return only existing flags", async () => {
+      await model.create({ name: "existing-name-flag", everyone: true });
+
+      const flags = await model.getManyByName([
+        "existing-name-flag",
+        "non-existent",
+      ]);
+
+      expect(flags).toHaveLength(1);
+      expect(flags[0].name).toBe("existing-name-flag");
+    });
+
+    it("should handle all non-existent flags", async () => {
+      const flags = await model.getManyByName([
+        "non-existent-1",
+        "non-existent-2",
+      ]);
+      expect(flags).toEqual([]);
+    });
+  });
+
+  describe("areActiveForUser", () => {
+    it("should check multiple flags at once", async () => {
+      await model.create({ name: "multi-flag1", everyone: true });
+      await model.create({ name: "multi-flag2", everyone: false });
+      await model.create({ name: "multi-flag3", roles: ["admin"] });
+
+      const results = await model.areActiveForUser({
+        names: ["multi-flag1", "multi-flag2", "multi-flag3"],
+        user: "user123",
+        roles: ["admin"],
+      });
+
+      expect(results).toEqual({
+        "multi-flag1": true,
+        "multi-flag2": false,
+        "multi-flag3": true,
+      });
+    });
+
+    it("should return false for non-existent flags", async () => {
+      await model.create({ name: "multi-existing", everyone: true });
+
+      const results = await model.areActiveForUser({
+        names: ["multi-existing", "multi-non-existent"],
+        user: "user123",
+      });
+
+      expect(results).toEqual({
+        "multi-existing": true,
+        "multi-non-existent": false,
+      });
+    });
+
+    it("should handle empty names array", async () => {
+      const results = await model.areActiveForUser({
+        names: [],
+        user: "user123",
+      });
+
+      expect(results).toEqual({});
+    });
+
+    it("should respect percentage rollout for each flag", async () => {
+      await model.create({ name: "multi-percent1", percent: 50 });
+      await model.create({ name: "multi-percent2", percent: 50 });
+
+      const results = await model.areActiveForUser({
+        names: ["multi-percent1", "multi-percent2"],
+        user: "user123",
+      });
+
+      // Both should use same hash for user, so consistency
+      const result1a = await model.isActiveForUser({
+        name: "multi-percent1",
+        user: "user123",
+      });
+      const result2a = await model.isActiveForUser({
+        name: "multi-percent2",
+        user: "user123",
+      });
+
+      expect(results["multi-percent1"]).toBe(result1a);
+      expect(results["multi-percent2"]).toBe(result2a);
+    });
+
+    it("should handle mixed flag types", async () => {
+      await model.create({ name: "multi-everyone-flag", everyone: true });
+      await model.create({ name: "multi-role-flag", roles: ["admin"] });
+      await model.create({
+        name: "multi-user-flag",
+        users: ["special-user"],
+      });
+      await model.create({
+        name: "multi-group-flag",
+        groups: ["beta-testers"],
+      });
+
+      const results = await model.areActiveForUser({
+        names: [
+          "multi-everyone-flag",
+          "multi-role-flag",
+          "multi-user-flag",
+          "multi-group-flag",
+        ],
+        user: "special-user",
+        roles: ["user"],
+        groups: ["beta-testers"],
+      });
+
+      expect(results).toEqual({
+        "multi-everyone-flag": true,
+        "multi-role-flag": false,
+        "multi-user-flag": true,
+        "multi-group-flag": true,
+      });
+    });
+
+    it("should handle expired flags with event handlers", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 7);
+
+      const onExpiredMock = vi.fn().mockImplementation(async ({ flag }) => {
+        return flag.name === "multi-expired-override" ? true : undefined;
+      });
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "multi-expired-override",
+        everyone: false,
+        expires: pastDate,
+      });
+
+      await modelWithHandler.create({
+        name: "multi-expired-continue",
+        roles: ["admin"],
+        expires: pastDate,
+      });
+
+      const results = await modelWithHandler.areActiveForUser({
+        names: ["multi-expired-override", "multi-expired-continue"],
+        user: "user123",
+        roles: ["admin"],
+      });
+
+      expect(onExpiredMock).toHaveBeenCalledTimes(2);
+      expect(results).toEqual({
+        "multi-expired-override": true, // Handler override
+        "multi-expired-continue": true, // Handler undefined, role matches
+      });
+    });
+
+    it("should maintain consistent results with isActiveForUser", async () => {
+      await model.create({ name: "multi-test1", everyone: true });
+      await model.create({ name: "multi-test2", roles: ["admin"] });
+      await model.create({ name: "multi-test3", users: ["user123"] });
+
+      const params = {
+        user: "user123",
+        roles: ["admin"],
+        groups: ["beta"],
+      };
+
+      const multiResults = await model.areActiveForUser({
+        names: ["multi-test1", "multi-test2", "multi-test3"],
+        ...params,
+      });
+
+      const singleResult1 = await model.isActiveForUser({
+        name: "multi-test1",
+        ...params,
+      });
+      const singleResult2 = await model.isActiveForUser({
+        name: "multi-test2",
+        ...params,
+      });
+      const singleResult3 = await model.isActiveForUser({
+        name: "multi-test3",
+        ...params,
+      });
+
+      expect(multiResults["multi-test1"]).toBe(singleResult1);
+      expect(multiResults["multi-test2"]).toBe(singleResult2);
+      expect(multiResults["multi-test3"]).toBe(singleResult3);
+    });
+
+    it("should check all flags when names is not provided", async () => {
+      await model.create({ name: "all-flag1", everyone: true });
+      await model.create({ name: "all-flag2", everyone: false });
+      await model.create({ name: "all-flag3", roles: ["admin"] });
+      await model.create({ name: "all-flag4", users: ["user123"] });
+
+      const results = await model.areActiveForUser({
+        user: "user123",
+        roles: ["user"],
+      });
+
+      // Should include all flags
+      expect(results["all-flag1"]).toBe(true);
+      expect(results["all-flag2"]).toBe(false);
+      expect(results["all-flag3"]).toBe(false); // User doesn't have admin role
+      expect(results["all-flag4"]).toBe(true); // User is in users list
+    });
+
+    it("should handle all flags with various user contexts", async () => {
+      await model.create({ name: "all-test1", groups: ["beta-testers"] });
+      await model.create({ name: "all-test2", percent: 50 });
+
+      const results = await model.areActiveForUser({
+        user: "user456",
+        groups: ["beta-testers"],
+      });
+
+      // Should include all flags
+      expect(results["all-test1"]).toBe(true); // User in beta-testers
+      // all-test2 depends on hash, just check it exists
+      expect(results).toHaveProperty("all-test2");
+      expect(typeof results["all-test2"]).toBe("boolean");
+    });
+
+    it("should return all flags even when no user context provided", async () => {
+      await model.create({ name: "no-context-flag1", everyone: true });
+      await model.create({ name: "no-context-flag2", everyone: false });
+      await model.create({ name: "no-context-flag3", roles: ["admin"] });
+
+      const results = await model.areActiveForUser({});
+
+      expect(results["no-context-flag1"]).toBe(true);
+      expect(results["no-context-flag2"]).toBe(false);
+      expect(results["no-context-flag3"]).toBe(false);
+    });
+
+    it("should handle expired flags when checking all flags", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 7);
+
+      const onExpiredMock = vi.fn().mockImplementation(async ({ flag }) => {
+        return flag.name === "all-expired-override" ? true : undefined;
+      });
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "all-expired-override",
+        everyone: false,
+        expires: pastDate,
+      });
+
+      await modelWithHandler.create({
+        name: "all-expired-continue",
+        roles: ["admin"],
+        expires: pastDate,
+      });
+
+      await modelWithHandler.create({
+        name: "all-not-expired",
+        everyone: true,
+      });
+
+      const results = await modelWithHandler.areActiveForUser({
+        user: "user123",
+        roles: ["admin"],
+      });
+
+      // Check that our specific expired flags triggered the handler
+      expect(onExpiredMock).toHaveBeenCalled();
+      const expiredOverrideCalls = onExpiredMock.mock.calls.filter(
+        (call) => call[0].flag.name === "all-expired-override",
+      );
+      const expiredContinueCalls = onExpiredMock.mock.calls.filter(
+        (call) => call[0].flag.name === "all-expired-continue",
+      );
+      expect(expiredOverrideCalls.length).toBe(1);
+      expect(expiredContinueCalls.length).toBe(1);
+
+      // Verify the results for our specific flags
+      expect(results["all-expired-override"]).toBe(true); // Handler override
+      expect(results["all-expired-continue"]).toBe(true); // Handler undefined, role matches
+      expect(results["all-not-expired"]).toBe(true); // Not expired, everyone true
+    });
+  });
 });
 
 describe("FeatureFlagGroupModel", () => {

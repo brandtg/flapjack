@@ -194,6 +194,25 @@ export class FeatureFlagModel {
   }
 
   /**
+   * Retrieves multiple feature flags by their names.
+   *
+   * @param names - Array of feature flag names to retrieve
+   * @returns Array of feature flags found (may be shorter than input if some names don't exist)
+   *
+   * @example
+   * ```typescript
+   * const flags = await model.getManyByName(["feature1", "feature2", "feature3"]);
+   * console.log(`Found ${flags.length} flags`);
+   * ```
+   */
+  async getManyByName(names: string[]): Promise<FeatureFlag[]> {
+    if (names.length === 0) return [];
+    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE name = ANY($1)`;
+    const res = await this.db.query(sql, [names]);
+    return res.rows.map(mapRow);
+  }
+
+  /**
    * Retrieves multiple feature flags by their IDs.
    *
    * @param ids - Array of feature flag IDs to retrieve
@@ -340,6 +359,59 @@ export class FeatureFlagModel {
   }
 
   /**
+   * Evaluates a feature flag for a user based on flag configuration.
+   * This is a stateless helper that performs the actual flag evaluation logic.
+   */
+  async evaluateFlagForUser(
+    flag: FeatureFlag,
+    {
+      user,
+      roles,
+      groups,
+    }: {
+      user?: string;
+      roles?: string[];
+      groups?: string[];
+    },
+  ): Promise<boolean> {
+    // Everyone Override: If everyone is true or false, return that value immediately
+    if (flag.everyone !== undefined && flag.everyone !== null) {
+      return flag.everyone;
+    }
+
+    // User-Specific Check: If user ID is in the users array, return true
+    if (user && flag.users && flag.users.includes(user)) {
+      return true;
+    }
+
+    // Group Check: If any of the user's groups match any group in the groups array, return true
+    if (groups && this.isActiveForGroups(groups, flag.groups)) {
+      return true;
+    }
+
+    // Role Check: If any of the user's roles match any role in the roles array, return true
+    if (flag.roles && roles) {
+      for (const role of roles) {
+        if (flag.roles.includes(role)) {
+          return true;
+        }
+      }
+    }
+
+    // Percentage Check: If percentage rollout applies to this user, return rollout result
+    if (user && flag.percent && flag.percent > 0) {
+      const userHash = await this.hashUserId(user);
+      const bucket = userHash % 100;
+      if (bucket < flag.percent) {
+        return true;
+      }
+    }
+
+    // Default: Return false
+    return false;
+  }
+
+  /**
    * Computes the hash value for a user ID using MurmurHash3.
    *
    * @param userId - The user ID to hash
@@ -429,41 +501,112 @@ export class FeatureFlagModel {
       }
     }
 
-    // Everyone Override: If everyone is true or false, return that value immediately
-    if (flag.everyone !== undefined && flag.everyone !== null) {
-      return flag.everyone;
+    return this.evaluateFlagForUser(flag, { user, roles, groups });
+  }
+
+  /**
+   * Checks if multiple feature flags are active for a user based on configured rules.
+   *
+   * @param params - Parameters for flag evaluation
+   * @param params.names - Optional array of feature flag names to check. If not provided, checks all flags.
+   * @param params.user - Optional user ID
+   * @param params.roles - Optional list of roles the user has
+   * @param params.groups - Optional list of groups the user belongs to
+   * @returns Record mapping flag names to their active status (true/false)
+   *
+   * @remarks
+   * This method fetches all flags in a single query for efficiency.
+   * If names is provided, only those flags are checked. Non-existent flags are marked as false.
+   * If names is not provided, all flags in the database are checked.
+   * Evaluation order for each flag (first match wins):
+   * 1. Everyone override (if set to true/false, returns immediately)
+   * 2. User ID is in the users list
+   * 3. User belongs to any group in the groups list
+   * 4. User has any role in the roles list
+   * 5. User falls within the percentage rollout (based on consistent hashing)
+   * 6. Default: returns false
+   *
+   * @example
+   * ```typescript
+   * // Check specific flags
+   * const results = await model.areActiveForUser({
+   *   names: ["feature1", "feature2", "feature3"],
+   *   user: "user_123",
+   *   roles: ["admin"],
+   *   groups: ["beta_testers"],
+   * });
+   *
+   * // Check all flags
+   * const allResults = await model.areActiveForUser({
+   *   user: "user_123",
+   *   roles: ["admin"],
+   *   groups: ["beta_testers"],
+   * });
+   *
+   * if (results["feature1"]) {
+   *   // Show feature1
+   * }
+   * if (results["feature2"]) {
+   *   // Show feature2
+   * }
+   * ```
+   */
+  async areActiveForUser({
+    names,
+    user,
+    roles,
+    groups,
+  }: {
+    names?: string[];
+    user?: string;
+    roles?: string[];
+    groups?: string[];
+  }): Promise<Record<string, boolean>> {
+    let flags: FeatureFlag[];
+    let requestedNames: string[];
+
+    if (names === undefined) {
+      // If no names provided, get all flags
+      flags = await this.list();
+      requestedNames = flags.map((flag) => flag.name);
+    } else {
+      // If names provided, fetch only those flags
+      flags = await this.getManyByName(names);
+      requestedNames = names;
     }
 
-    // User-Specific Check: If user ID is in the users array, return true
-    if (user && flag.users && flag.users.includes(user)) {
-      return true;
-    }
+    const flagMap = new Map(flags.map((flag) => [flag.name, flag]));
+    const result: Record<string, boolean> = {};
 
-    // Group Check: If any of the user's groups match any group in the groups array, return true
-    if (groups && this.isActiveForGroups(groups, flag.groups)) {
-      return true;
-    }
+    for (const name of requestedNames) {
+      const flag = flagMap.get(name);
 
-    // Role Check: If any of the user's roles match any role in the roles array, return true
-    if (flag.roles && roles) {
-      for (const role of roles) {
-        if (flag.roles.includes(role)) {
-          return true;
+      if (!flag) {
+        result[name] = false;
+        continue;
+      }
+
+      // If the flag has expired, trigger event
+      if (
+        this.eventHandlers?.onExpired &&
+        flag.expires &&
+        flag.expires <= new Date()
+      ) {
+        const expiredResult = await this.eventHandlers.onExpired({ flag });
+        if (expiredResult !== undefined) {
+          result[name] = expiredResult;
+          continue;
         }
       }
+
+      result[name] = await this.evaluateFlagForUser(flag, {
+        user,
+        roles,
+        groups,
+      });
     }
 
-    // Percentage Check: If percentage rollout applies to this user, return rollout result
-    if (user && flag.percent && flag.percent > 0) {
-      const userHash = await this.hashUserId(user);
-      const bucket = userHash % 100;
-      if (bucket < flag.percent) {
-        return true;
-      }
-    }
-
-    // Default: Return false
-    return false;
+    return result;
   }
 }
 
