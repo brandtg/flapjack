@@ -833,23 +833,25 @@ cli.command(
   "group-update <id>",
   "Update a feature flag group",
   (yargs) => {
-    return yargs.positional("id", {
-      type: "number",
-      describe: "Feature flag group ID",
-    }).options({
-      name: {
-        type: "string",
-        describe: "Feature flag group name",
-      },
-      note: {
-        type: "string",
-        describe: "Feature flag group description",
-      },
-      "clear-note": {
-        type: "boolean",
-        describe: "Clear the group note",
-      },
-    });
+    return yargs
+      .positional("id", {
+        type: "number",
+        describe: "Feature flag group ID",
+      })
+      .options({
+        name: {
+          type: "string",
+          describe: "Feature flag group name",
+        },
+        note: {
+          type: "string",
+          describe: "Feature flag group description",
+        },
+        "clear-note": {
+          type: "boolean",
+          describe: "Clear the group note",
+        },
+      });
   },
   async (argv) => {
     const db = createDatabase();
@@ -967,7 +969,10 @@ cli.command(
     const model = new FeatureFlagGroupModel(db);
 
     try {
-      const removed = await model.removeFeatureFlag(argv.groupId!, argv.flagId!);
+      const removed = await model.removeFeatureFlag(
+        argv.groupId!,
+        argv.flagId!,
+      );
       console.log(
         JSON.stringify(
           {
@@ -1063,51 +1068,53 @@ cli.command(
   "group-update-all <groupId>",
   "Update all feature flags in a group",
   (yargs) => {
-    return yargs.positional("groupId", {
-      type: "number",
-      describe: "Feature flag group ID",
-    }).options({
-      everyone: {
-        type: "boolean",
-        describe: "Enable flag for everyone (overrides all other settings)",
-      },
-      percent: {
+    return yargs
+      .positional("groupId", {
         type: "number",
-        describe: "Percentage rollout (0-99.9)",
-      },
-      roles: {
-        type: "array",
-        describe: "List of roles that have this flag enabled",
-      },
-      groups: {
-        type: "array",
-        describe: "List of user groups that have this flag enabled",
-      },
-      users: {
-        type: "array",
-        describe: "List of specific user IDs that have this flag enabled",
-      },
-      "clear-everyone": {
-        type: "boolean",
-        describe: "Unset the everyone override",
-      },
-      "clear-percent": {
-        type: "boolean",
-        describe: "Unset percentage rollout",
-      },
-      "clear-roles": {
-        type: "boolean",
-        describe: "Clear roles list",
-      },
-      "clear-groups": {
-        type: "boolean",
-        describe: "Clear groups list",
-      },
-      "clear-users": {
-        type: "boolean",
-        describe: "Clear users list",
-      },
-    });
+        describe: "Feature flag group ID",
+      })
+      .options({
+        everyone: {
+          type: "boolean",
+          describe: "Enable flag for everyone (overrides all other settings)",
+        },
+        percent: {
+          type: "number",
+          describe: "Percentage rollout (0-99.9)",
+        },
+        roles: {
+          type: "array",
+          describe: "List of roles that have this flag enabled",
+        },
+        groups: {
+          type: "array",
+          describe: "List of user groups that have this flag enabled",
+        },
+        users: {
+          type: "array",
+          describe: "List of specific user IDs that have this flag enabled",
+        },
+        "clear-everyone": {
+          type: "boolean",
+          describe: "Unset the everyone override",
+        },
+        "clear-percent": {
+          type: "boolean",
+          describe: "Unset percentage rollout",
+        },
+        "clear-roles": {
+          type: "boolean",
+          describe: "Clear roles list",
+        },
+        "clear-groups": {
+          type: "boolean",
+          describe: "Clear groups list",
+        },
+        "clear-users": {
+          type: "boolean",
+          describe: "Clear users list",
+        },
+      });
   },
   async (argv) => {
     const db = createDatabase();

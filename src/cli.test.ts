@@ -228,25 +228,14 @@ describe("CLI smoke", () => {
     );
 
     const isActiveContextRes = await runCli(
-      [
-        "is-active-context",
-        "cli-subject-flag",
-        "--subjects",
-        "tenant:acme",
-      ],
+      ["is-active-context", "cli-subject-flag", "--subjects", "tenant:acme"],
       { DATABASE_URL: TEST_DB_URL },
     );
     expect(isActiveContextRes.code).toBe(0);
     expect(JSON.parse(isActiveContextRes.stdout.trim()).isActive).toBe(true);
 
     const areActiveUserRes = await runCli(
-      [
-        "are-active",
-        "--names",
-        "cli-subject-flag",
-        "--roles",
-        "admin",
-      ],
+      ["are-active", "--names", "cli-subject-flag", "--roles", "admin"],
       { DATABASE_URL: TEST_DB_URL },
     );
     expect(areActiveUserRes.code).toBe(0);
@@ -264,7 +253,9 @@ describe("CLI smoke", () => {
       { DATABASE_URL: TEST_DB_URL },
     );
     expect(areActiveContextRes.code).toBe(0);
-    const areActiveContextPayload = JSON.parse(areActiveContextRes.stdout.trim());
+    const areActiveContextPayload = JSON.parse(
+      areActiveContextRes.stdout.trim(),
+    );
     expect(areActiveContextPayload.results["cli-subject-flag"]).toBe(true);
 
     const listBySubjectRes = await runCli(["list-by-subject", "tenant:acme"], {
@@ -309,18 +300,23 @@ describe("CLI smoke", () => {
       { DATABASE_URL: TEST_DB_URL },
     );
     expect(groupListBySubjectRes.code).toBe(0);
-    const groupListBySubjectPayload = JSON.parse(groupListBySubjectRes.stdout.trim());
+    const groupListBySubjectPayload = JSON.parse(
+      groupListBySubjectRes.stdout.trim(),
+    );
     expect(groupListBySubjectPayload.groups.map((g: any) => g.id)).toContain(
       group.id,
     );
 
-    const groupListFlagsRes = await runCli(["group-list-flags", String(group.id)], {
-      DATABASE_URL: TEST_DB_URL,
-    });
-    expect(groupListFlagsRes.code).toBe(0);
-    expect(JSON.parse(groupListFlagsRes.stdout.trim()).flags.map((f: any) => f.id)).toContain(
-      flag.id,
+    const groupListFlagsRes = await runCli(
+      ["group-list-flags", String(group.id)],
+      {
+        DATABASE_URL: TEST_DB_URL,
+      },
     );
+    expect(groupListFlagsRes.code).toBe(0);
+    expect(
+      JSON.parse(groupListFlagsRes.stdout.trim()).flags.map((f: any) => f.id),
+    ).toContain(flag.id);
 
     const groupListForFlagRes = await runCli(
       ["group-list-for-flag", String(flag.id)],
@@ -328,7 +324,9 @@ describe("CLI smoke", () => {
     );
     expect(groupListForFlagRes.code).toBe(0);
     expect(
-      JSON.parse(groupListForFlagRes.stdout.trim()).groups.map((g: any) => g.id),
+      JSON.parse(groupListForFlagRes.stdout.trim()).groups.map(
+        (g: any) => g.id,
+      ),
     ).toContain(group.id);
 
     const groupUpdateAllRes = await runCli(
@@ -336,21 +334,18 @@ describe("CLI smoke", () => {
       { DATABASE_URL: TEST_DB_URL },
     );
     expect(groupUpdateAllRes.code).toBe(0);
-    expect(JSON.parse(groupUpdateAllRes.stdout.trim()).updatedCount).toBeGreaterThan(
-      0,
-    );
+    expect(
+      JSON.parse(groupUpdateAllRes.stdout.trim()).updatedCount,
+    ).toBeGreaterThan(0);
 
     const contextAfterUpdateRes = await runCli(
-      [
-        "is-active-context",
-        "cli-subject-flag",
-        "--subjects",
-        "tenant:acme",
-      ],
+      ["is-active-context", "cli-subject-flag", "--subjects", "tenant:acme"],
       { DATABASE_URL: TEST_DB_URL },
     );
     expect(contextAfterUpdateRes.code).toBe(0);
-    expect(JSON.parse(contextAfterUpdateRes.stdout.trim()).isActive).toBe(false);
+    expect(JSON.parse(contextAfterUpdateRes.stdout.trim()).isActive).toBe(
+      false,
+    );
 
     const removeSubjectRes = await runCli(
       ["remove-subject", String(flag.id), "tenant:acme"],

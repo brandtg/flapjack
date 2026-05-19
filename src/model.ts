@@ -368,7 +368,10 @@ export class FeatureFlagModel {
   /**
    * Removes an external subject identifier from a feature flag.
    */
-  async removeSubject(featureFlagId: number, subject: string): Promise<boolean> {
+  async removeSubject(
+    featureFlagId: number,
+    subject: string,
+  ): Promise<boolean> {
     const sql = `DELETE FROM ${SUBJECT_TABLE} WHERE feature_flag_id = $1 AND subject = $2`;
     const res = await this.db.query(sql, [featureFlagId, subject]);
     return (res as any).rowCount > 0;
@@ -398,7 +401,9 @@ export class FeatureFlagModel {
     return res.rows.map(mapRow);
   }
 
-  private async getSubjectMatchedFlagIds(subjects: string[] = []): Promise<Set<number>> {
+  private async getSubjectMatchedFlagIds(
+    subjects: string[] = [],
+  ): Promise<Set<number>> {
     if (subjects.length === 0) {
       return new Set<number>();
     }

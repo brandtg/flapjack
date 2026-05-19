@@ -468,7 +468,9 @@ describe("FeatureFlagModel", () => {
     });
 
     it("should cascade delete subject mappings for a feature flag", async () => {
-      const created = await model.create({ name: "test-delete-subject-cascade" });
+      const created = await model.create({
+        name: "test-delete-subject-cascade",
+      });
       await model.addSubject(created.id, "tenant:delete-cascade");
 
       const beforeDelete = await model.getSubjects(created.id);
@@ -2198,7 +2200,9 @@ describe("FeatureFlagGroupModel", () => {
 
   describe("subject mappings", () => {
     it("should add and remove subjects for a group", async () => {
-      const group = await groupModel.create({ name: "group-subject-add-remove" });
+      const group = await groupModel.create({
+        name: "group-subject-add-remove",
+      });
 
       const added = await groupModel.addSubject(group.id, "tenant:acme");
       expect(added).toBe(true);
@@ -2212,7 +2216,10 @@ describe("FeatureFlagGroupModel", () => {
       const removed = await groupModel.removeSubject(group.id, "tenant:acme");
       expect(removed).toBe(true);
 
-      const removedAgain = await groupModel.removeSubject(group.id, "tenant:acme");
+      const removedAgain = await groupModel.removeSubject(
+        group.id,
+        "tenant:acme",
+      );
       expect(removedAgain).toBe(false);
     });
 
@@ -2230,13 +2237,16 @@ describe("FeatureFlagGroupModel", () => {
     });
 
     it("should return empty arrays when no subject mappings exist", async () => {
-      const group = await groupModel.create({ name: "group-subject-empty-list" });
+      const group = await groupModel.create({
+        name: "group-subject-empty-list",
+      });
       const flag = await flagModel.create({ name: "flag-subject-empty-list" });
 
       const groupSubjects = await groupModel.getSubjects(group.id);
       const flagSubjects = await flagModel.getSubjects(flag.id);
       const groups = await groupModel.getGroupsForSubject("tenant:no-match");
-      const flags = await flagModel.getFeatureFlagsForSubject("tenant:no-match");
+      const flags =
+        await flagModel.getFeatureFlagsForSubject("tenant:no-match");
 
       expect(groupSubjects).toEqual([]);
       expect(flagSubjects).toEqual([]);
@@ -2245,7 +2255,9 @@ describe("FeatureFlagGroupModel", () => {
     });
 
     it("should reject subject assignment for missing entities", async () => {
-      await expect(flagModel.addSubject(9999999, "tenant:missing-flag")).rejects.toThrow();
+      await expect(
+        flagModel.addSubject(9999999, "tenant:missing-flag"),
+      ).rejects.toThrow();
       await expect(
         groupModel.addSubject(9999999, "tenant:missing-group"),
       ).rejects.toThrow();
