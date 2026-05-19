@@ -466,6 +466,20 @@ describe("FeatureFlagModel", () => {
       const deleted = await model.delete(99999);
       expect(deleted).toBe(false);
     });
+
+    it("should cascade delete subject mappings for a feature flag", async () => {
+      const created = await model.create({ name: "test-delete-subject-cascade" });
+      await model.addSubject(created.id, "tenant:delete-cascade");
+
+      const beforeDelete = await model.getSubjects(created.id);
+      expect(beforeDelete).toContain("tenant:delete-cascade");
+
+      const deleted = await model.delete(created.id);
+      expect(deleted).toBe(true);
+
+      const afterDelete = await model.getSubjects(created.id);
+      expect(afterDelete).toEqual([]);
+    });
   });
 
   describe("getLastModified", () => {
@@ -934,6 +948,105 @@ describe("FeatureFlagModel", () => {
 
       // Default behavior: expired flags are not active
       expect(isActive).toBe(true); // Should continue with normal evaluation
+    });
+
+    it("should keep everyone false as highest precedence over subjects", async () => {
+      const flag = await model.create({
+        name: "subject-precedence-everyone-false",
+        everyone: false,
+        users: ["subject-user"],
+        roles: ["admin"],
+        groups: ["beta"],
+        percent: 99.9,
+      });
+      await model.addSubject(flag.id, "tenant:override");
+
+      const isActive = await model.isActiveForContext({
+        name: "subject-precedence-everyone-false",
+        user: "subject-user",
+        roles: ["admin"],
+        groups: ["beta"],
+        subjects: ["tenant:override"],
+      });
+
+      expect(isActive).toBe(false);
+    });
+
+    it("should prioritize user match over subject match", async () => {
+      const flag = await model.create({
+        name: "subject-precedence-user",
+        users: ["user-priority-subject"],
+      });
+      await model.addSubject(flag.id, "tenant:user-priority");
+
+      const fromUserOnly = await model.isActiveForContext({
+        name: "subject-precedence-user",
+        user: "user-priority-subject",
+      });
+      const fromSubjectOnly = await model.isActiveForContext({
+        name: "subject-precedence-user",
+        subjects: ["tenant:user-priority"],
+      });
+
+      expect(fromUserOnly).toBe(true);
+      expect(fromSubjectOnly).toBe(true);
+    });
+
+    it("should prioritize subject match over groups roles and percent", async () => {
+      const flag = await model.create({
+        name: "subject-precedence-over-group-role-percent",
+        groups: ["subject-required-group"],
+        roles: ["subject-required-role"],
+        percent: 0.1,
+      });
+      await model.addSubject(flag.id, "tenant:subject-priority");
+
+      const isActive = await model.isActiveForContext({
+        name: "subject-precedence-over-group-role-percent",
+        user: "subject-priority-user",
+        roles: ["non-matching-role"],
+        groups: ["non-matching-group"],
+        subjects: ["tenant:subject-priority"],
+      });
+
+      expect(isActive).toBe(true);
+    });
+
+    it("should treat subject identifiers as case-sensitive", async () => {
+      const flag = await model.create({ name: "subject-case-sensitive" });
+      await model.addSubject(flag.id, "Tenant:CaseSensitive");
+
+      const exact = await model.isActiveForContext({
+        name: "subject-case-sensitive",
+        subjects: ["Tenant:CaseSensitive"],
+      });
+      const differentCase = await model.isActiveForContext({
+        name: "subject-case-sensitive",
+        subjects: ["tenant:casesensitive"],
+      });
+
+      expect(exact).toBe(true);
+      expect(differentCase).toBe(false);
+    });
+
+    it("should treat empty subjects as no-op and preserve legacy behavior", async () => {
+      await model.create({
+        name: "subject-empty-array-compat",
+        roles: ["admin"],
+      });
+
+      const withUndefinedSubjects = await model.isActiveForContext({
+        name: "subject-empty-array-compat",
+        roles: ["admin"],
+      });
+      const withEmptySubjects = await model.isActiveForContext({
+        name: "subject-empty-array-compat",
+        roles: ["admin"],
+        subjects: [],
+      });
+
+      expect(withUndefinedSubjects).toBe(true);
+      expect(withEmptySubjects).toBe(true);
     });
   });
 
@@ -1538,6 +1651,120 @@ describe("FeatureFlagModel", () => {
       expect(results["all-expired-continue"]).toBe(true); // Handler undefined, role matches
       expect(results["all-not-expired"]).toBe(true); // Not expired, everyone true
     });
+
+    it("should activate a flag by direct subject match", async () => {
+      const flag = await model.create({
+        name: "subject-direct-match",
+      });
+      await model.addSubject(flag.id, "tenant:acme");
+
+      const enabled = await model.isActiveForContext({
+        name: "subject-direct-match",
+        subjects: ["tenant:acme"],
+      });
+
+      expect(enabled).toBe(true);
+    });
+
+    it("should activate a flag by subject match through flag group", async () => {
+      const groupModel = new FeatureFlagGroupModel(testPool);
+      const group = await groupModel.create({
+        name: "subject-group-match-group",
+      });
+      const flag = await model.create({
+        name: "subject-group-match-flag",
+      });
+      await groupModel.addFeatureFlag(group.id, flag.id);
+      await groupModel.addSubject(group.id, "tenant:beta");
+
+      const enabled = await model.isActiveForContext({
+        name: "subject-group-match-flag",
+        subjects: ["tenant:beta"],
+      });
+
+      expect(enabled).toBe(true);
+    });
+
+    it("should keep user API parity with context API", async () => {
+      await model.create({ name: "context-parity", users: ["parity-user"] });
+
+      const fromUser = await model.isActiveForUser({
+        name: "context-parity",
+        user: "parity-user",
+      });
+      const fromContext = await model.isActiveForContext({
+        name: "context-parity",
+        user: "parity-user",
+      });
+
+      expect(fromUser).toBe(fromContext);
+    });
+
+    it("should check multiple flags with subjects", async () => {
+      const on = await model.create({ name: "context-multi-on" });
+      await model.create({ name: "context-multi-off" });
+      await model.addSubject(on.id, "tenant:gamma");
+
+      const results = await model.areActiveForContext({
+        names: ["context-multi-on", "context-multi-off"],
+        subjects: ["tenant:gamma"],
+      });
+
+      expect(results).toEqual({
+        "context-multi-on": true,
+        "context-multi-off": false,
+      });
+    });
+
+    it("should return false for missing names in areActiveForContext", async () => {
+      await model.create({ name: "context-existing-name", everyone: true });
+
+      const results = await model.areActiveForContext({
+        names: ["context-existing-name", "context-missing-name"],
+        subjects: ["tenant:any"],
+      });
+
+      expect(results).toEqual({
+        "context-existing-name": true,
+        "context-missing-name": false,
+      });
+    });
+
+    it("should preserve backwards compatibility between areActiveForUser and areActiveForContext", async () => {
+      await model.create({ name: "context-compat-1", everyone: true });
+      await model.create({ name: "context-compat-2", roles: ["admin"] });
+
+      const params = {
+        names: ["context-compat-1", "context-compat-2"],
+        user: "compat-user",
+        roles: ["admin"],
+        groups: ["beta"],
+      };
+
+      const fromUserApi = await model.areActiveForUser(params);
+      const fromContextApi = await model.areActiveForContext(params);
+
+      expect(fromUserApi).toEqual(fromContextApi);
+    });
+
+    it("should resolve subject matches from both direct and group mappings", async () => {
+      const directFlag = await model.create({ name: "subject-both-direct" });
+      const groupedFlag = await model.create({ name: "subject-both-grouped" });
+      await model.addSubject(directFlag.id, "tenant:both");
+
+      const groupModel = new FeatureFlagGroupModel(testPool);
+      const group = await groupModel.create({ name: "subject-both-group" });
+      await groupModel.addFeatureFlag(group.id, groupedFlag.id);
+      await groupModel.addSubject(group.id, "tenant:both");
+
+      const results = await model.areActiveForContext({
+        names: ["subject-both-direct", "subject-both-grouped"],
+        subjects: ["tenant:both"],
+      });
+
+      expect(results["subject-both-direct"]).toBe(true);
+      expect(results["subject-both-grouped"]).toBe(true);
+    });
   });
 });
 
@@ -1760,6 +1987,22 @@ describe("FeatureFlagGroupModel", () => {
       const flags = await groupModel.getFeatureFlags(group.id);
       expect(flags).toHaveLength(0);
     });
+
+    it("should cascade delete group subject mappings", async () => {
+      const group = await groupModel.create({
+        name: "delete-cascade-group-subjects",
+      });
+      await groupModel.addSubject(group.id, "tenant:group-delete");
+
+      const beforeDelete = await groupModel.getSubjects(group.id);
+      expect(beforeDelete).toContain("tenant:group-delete");
+
+      const deleted = await groupModel.delete(group.id);
+      expect(deleted).toBe(true);
+
+      const afterDelete = await groupModel.getSubjects(group.id);
+      expect(afterDelete).toEqual([]);
+    });
   });
 
   describe("addFeatureFlag", () => {
@@ -1950,6 +2193,91 @@ describe("FeatureFlagGroupModel", () => {
           groups[i].created.getTime(),
         );
       }
+    });
+  });
+
+  describe("subject mappings", () => {
+    it("should add and remove subjects for a group", async () => {
+      const group = await groupModel.create({ name: "group-subject-add-remove" });
+
+      const added = await groupModel.addSubject(group.id, "tenant:acme");
+      expect(added).toBe(true);
+
+      const duplicate = await groupModel.addSubject(group.id, "tenant:acme");
+      expect(duplicate).toBe(false);
+
+      const subjects = await groupModel.getSubjects(group.id);
+      expect(subjects).toContain("tenant:acme");
+
+      const removed = await groupModel.removeSubject(group.id, "tenant:acme");
+      expect(removed).toBe(true);
+
+      const removedAgain = await groupModel.removeSubject(group.id, "tenant:acme");
+      expect(removedAgain).toBe(false);
+    });
+
+    it("should list groups for a subject", async () => {
+      const group1 = await groupModel.create({ name: "group-subject-list-1" });
+      const group2 = await groupModel.create({ name: "group-subject-list-2" });
+      await groupModel.addSubject(group1.id, "tenant:list");
+      await groupModel.addSubject(group2.id, "tenant:list");
+
+      const groups = await groupModel.getGroupsForSubject("tenant:list");
+      const names = groups.map((g) => g.name);
+
+      expect(names).toContain("group-subject-list-1");
+      expect(names).toContain("group-subject-list-2");
+    });
+
+    it("should return empty arrays when no subject mappings exist", async () => {
+      const group = await groupModel.create({ name: "group-subject-empty-list" });
+      const flag = await flagModel.create({ name: "flag-subject-empty-list" });
+
+      const groupSubjects = await groupModel.getSubjects(group.id);
+      const flagSubjects = await flagModel.getSubjects(flag.id);
+      const groups = await groupModel.getGroupsForSubject("tenant:no-match");
+      const flags = await flagModel.getFeatureFlagsForSubject("tenant:no-match");
+
+      expect(groupSubjects).toEqual([]);
+      expect(flagSubjects).toEqual([]);
+      expect(groups).toEqual([]);
+      expect(flags).toEqual([]);
+    });
+
+    it("should reject subject assignment for missing entities", async () => {
+      await expect(flagModel.addSubject(9999999, "tenant:missing-flag")).rejects.toThrow();
+      await expect(
+        groupModel.addSubject(9999999, "tenant:missing-group"),
+      ).rejects.toThrow();
+    });
+
+    it("should add and remove subjects for a flag", async () => {
+      const flag = await flagModel.create({ name: "flag-subject-add-remove" });
+
+      const added = await flagModel.addSubject(flag.id, "tenant:direct");
+      expect(added).toBe(true);
+
+      const duplicate = await flagModel.addSubject(flag.id, "tenant:direct");
+      expect(duplicate).toBe(false);
+
+      const subjects = await flagModel.getSubjects(flag.id);
+      expect(subjects).toContain("tenant:direct");
+
+      const removed = await flagModel.removeSubject(flag.id, "tenant:direct");
+      expect(removed).toBe(true);
+    });
+
+    it("should list flags for a subject", async () => {
+      const flag1 = await flagModel.create({ name: "flag-for-subject-1" });
+      const flag2 = await flagModel.create({ name: "flag-for-subject-2" });
+      await flagModel.addSubject(flag1.id, "tenant:flags");
+      await flagModel.addSubject(flag2.id, "tenant:flags");
+
+      const flags = await flagModel.getFeatureFlagsForSubject("tenant:flags");
+      const names = flags.map((f) => f.name);
+
+      expect(names).toContain("flag-for-subject-1");
+      expect(names).toContain("flag-for-subject-2");
     });
   });
 

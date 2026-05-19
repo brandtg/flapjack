@@ -99,11 +99,13 @@ export class FeatureFlagCache {
     user,
     roles,
     groups,
+    subjects,
   }: {
     name: string;
     user?: string;
     roles?: string[];
     groups?: string[];
+    subjects?: string[];
   }): string {
     // Create a consistent string representation of the parameters
     const keyParts = [
@@ -111,6 +113,7 @@ export class FeatureFlagCache {
       user || "",
       (roles || []).sort().join(","),
       (groups || []).sort().join(","),
+      (subjects || []).sort().join(","),
     ];
     const keyString = keyParts.join("|");
 
@@ -130,8 +133,35 @@ export class FeatureFlagCache {
     roles?: string[];
     groups?: string[];
   }): Promise<boolean> {
+    return this.isActiveForContext({
+      name,
+      user,
+      roles,
+      groups,
+    });
+  }
+
+  async isActiveForContext({
+    name,
+    user,
+    roles,
+    groups,
+    subjects,
+  }: {
+    name: string;
+    user?: string;
+    roles?: string[];
+    groups?: string[];
+    subjects?: string[];
+  }): Promise<boolean> {
     // Generate cache key
-    const cacheKey = this.generateCacheKey({ name, user, roles, groups });
+    const cacheKey = this.generateCacheKey({
+      name,
+      user,
+      roles,
+      groups,
+      subjects,
+    });
 
     // Try to get from cache first
     const cachedResult = await this.cache.get(cacheKey);
@@ -140,11 +170,12 @@ export class FeatureFlagCache {
     }
 
     // Cache miss, get from model
-    const result = await this.model.isActiveForUser({
+    const result = await this.model.isActiveForContext({
       name,
       user,
       roles,
       groups,
+      subjects,
     });
 
     // Store in cache with TTL
