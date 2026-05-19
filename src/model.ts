@@ -12,6 +12,8 @@ interface Queryable {
 }
 
 const TABLE = "flapjack.feature_flag";
+const SUBJECT_TABLE = "flapjack.feature_flag_subject";
+const GROUP_SUBJECT_TABLE = "flapjack.feature_flag_group_subject";
 
 const COLUMNS = [
   "id",
@@ -348,6 +350,79 @@ export class FeatureFlagModel {
   }
 
   /**
+   * Adds an external subject identifier to a feature flag.
+   */
+  async addSubject(featureFlagId: number, subject: string): Promise<boolean> {
+    try {
+      const sql = `INSERT INTO ${SUBJECT_TABLE} (feature_flag_id, subject) VALUES ($1, $2)`;
+      await this.db.query(sql, [featureFlagId, subject]);
+      return true;
+    } catch (err: any) {
+      if (err.code === "23505") {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Removes an external subject identifier from a feature flag.
+   */
+  async removeSubject(
+    featureFlagId: number,
+    subject: string,
+  ): Promise<boolean> {
+    const sql = `DELETE FROM ${SUBJECT_TABLE} WHERE feature_flag_id = $1 AND subject = $2`;
+    const res = await this.db.query(sql, [featureFlagId, subject]);
+    return (res as any).rowCount > 0;
+  }
+
+  /**
+   * Gets all external subject identifiers associated with a feature flag.
+   */
+  async getSubjects(featureFlagId: number): Promise<string[]> {
+    const sql = `SELECT subject FROM ${SUBJECT_TABLE} WHERE feature_flag_id = $1 ORDER BY created DESC`;
+    const res = await this.db.query(sql, [featureFlagId]);
+    return res.rows.map((row: any) => row.subject as string);
+  }
+
+  /**
+   * Gets all feature flags directly associated with an external subject identifier.
+   */
+  async getFeatureFlagsForSubject(subject: string): Promise<FeatureFlag[]> {
+    const sql = `
+      SELECT ${COLUMNS.map((c) => `f.${c}`).join(", ")}
+      FROM ${TABLE} f
+      INNER JOIN ${SUBJECT_TABLE} s ON f.id = s.feature_flag_id
+      WHERE s.subject = $1
+      ORDER BY f.created DESC
+    `;
+    const res = await this.db.query(sql, [subject]);
+    return res.rows.map(mapRow);
+  }
+
+  private async getSubjectMatchedFlagIds(
+    subjects: string[] = [],
+  ): Promise<Set<number>> {
+    if (subjects.length === 0) {
+      return new Set<number>();
+    }
+
+    const sql = `
+      SELECT s.feature_flag_id AS feature_flag_id
+      FROM ${SUBJECT_TABLE} s
+      WHERE s.subject = ANY($1)
+      UNION
+      SELECT gm.feature_flag_id AS feature_flag_id
+      FROM ${GROUP_SUBJECT_TABLE} gs
+      INNER JOIN ${GROUP_MEMBER_TABLE} gm ON gs.feature_flag_group_id = gm.group_id
+      WHERE gs.subject = ANY($1)
+    `;
+    const res = await this.db.query(sql, [subjects]);
+    return new Set(res.rows.map((row: any) => Number(row.feature_flag_id)));
+  }
+
+  /**
    * Checks if a user belongs to any of the specified groups
    */
   private isActiveForGroups(
@@ -368,10 +443,14 @@ export class FeatureFlagModel {
       user,
       roles,
       groups,
+      subjects,
+      subjectMatchedFlagIds,
     }: {
       user?: string;
       roles?: string[];
       groups?: string[];
+      subjects?: string[];
+      subjectMatchedFlagIds?: Set<number>;
     },
   ): Promise<boolean> {
     // Everyone Override: If everyone is true or false, return that value immediately
@@ -382,6 +461,22 @@ export class FeatureFlagModel {
     // User-Specific Check: If user ID is in the users array, return true
     if (user && flag.users && flag.users.includes(user)) {
       return true;
+    }
+
+    // Subject Check: If any external subject maps to this flag directly or via group, return true
+    if (subjects && subjects.length > 0) {
+      let isSubjectMatched = false;
+
+      if (subjectMatchedFlagIds) {
+        isSubjectMatched = subjectMatchedFlagIds.has(flag.id);
+      } else {
+        const matchedFlagIds = await this.getSubjectMatchedFlagIds(subjects);
+        isSubjectMatched = matchedFlagIds.has(flag.id);
+      }
+
+      if (isSubjectMatched) {
+        return true;
+      }
     }
 
     // Group Check: If any of the user's groups match any group in the groups array, return true
@@ -481,6 +576,30 @@ export class FeatureFlagModel {
     roles?: string[];
     groups?: string[];
   }): Promise<boolean> {
+    return this.isActiveForContext({
+      name,
+      user,
+      roles,
+      groups,
+    });
+  }
+
+  /**
+   * Checks if a feature flag is active for a context, including optional external subjects.
+   */
+  async isActiveForContext({
+    name,
+    user,
+    roles,
+    groups,
+    subjects,
+  }: {
+    name: string;
+    user?: string;
+    roles?: string[];
+    groups?: string[];
+    subjects?: string[];
+  }): Promise<boolean> {
     const flag = await this.getByName(name);
 
     // No such flag
@@ -501,7 +620,14 @@ export class FeatureFlagModel {
       }
     }
 
-    return this.evaluateFlagForUser(flag, { user, roles, groups });
+    const subjectMatchedFlagIds = await this.getSubjectMatchedFlagIds(subjects);
+    return this.evaluateFlagForUser(flag, {
+      user,
+      roles,
+      groups,
+      subjects,
+      subjectMatchedFlagIds,
+    });
   }
 
   /**
@@ -562,6 +688,30 @@ export class FeatureFlagModel {
     roles?: string[];
     groups?: string[];
   }): Promise<Record<string, boolean>> {
+    return this.areActiveForContext({
+      names,
+      user,
+      roles,
+      groups,
+    });
+  }
+
+  /**
+   * Checks if multiple feature flags are active for a context, including optional external subjects.
+   */
+  async areActiveForContext({
+    names,
+    user,
+    roles,
+    groups,
+    subjects,
+  }: {
+    names?: string[];
+    user?: string;
+    roles?: string[];
+    groups?: string[];
+    subjects?: string[];
+  }): Promise<Record<string, boolean>> {
     let flags: FeatureFlag[];
     let requestedNames: string[];
 
@@ -577,6 +727,7 @@ export class FeatureFlagModel {
 
     const flagMap = new Map(flags.map((flag) => [flag.name, flag]));
     const result: Record<string, boolean> = {};
+    const subjectMatchedFlagIds = await this.getSubjectMatchedFlagIds(subjects);
 
     for (const name of requestedNames) {
       const flag = flagMap.get(name);
@@ -603,6 +754,8 @@ export class FeatureFlagModel {
         user,
         roles,
         groups,
+        subjects,
+        subjectMatchedFlagIds,
       });
     }
 
@@ -941,6 +1094,59 @@ export class FeatureFlagGroupModel {
       ORDER BY g.created DESC
     `;
     const res = await this.db.query(sql, [featureFlagId]);
+    return res.rows.map(mapGroupRow);
+  }
+
+  /**
+   * Adds an external subject identifier to a feature flag group.
+   */
+  async addSubject(groupId: number, subject: string): Promise<boolean> {
+    try {
+      const sql = `INSERT INTO ${GROUP_SUBJECT_TABLE} (feature_flag_group_id, subject)
+        VALUES ($1, $2)`;
+      await this.db.query(sql, [groupId, subject]);
+      return true;
+    } catch (err: any) {
+      if (err.code === "23505") {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Removes an external subject identifier from a feature flag group.
+   */
+  async removeSubject(groupId: number, subject: string): Promise<boolean> {
+    const sql = `DELETE FROM ${GROUP_SUBJECT_TABLE}
+      WHERE feature_flag_group_id = $1 AND subject = $2`;
+    const res = await this.db.query(sql, [groupId, subject]);
+    return (res as any).rowCount > 0;
+  }
+
+  /**
+   * Gets all external subject identifiers associated with a feature flag group.
+   */
+  async getSubjects(groupId: number): Promise<string[]> {
+    const sql = `SELECT subject FROM ${GROUP_SUBJECT_TABLE}
+      WHERE feature_flag_group_id = $1
+      ORDER BY created DESC`;
+    const res = await this.db.query(sql, [groupId]);
+    return res.rows.map((row: any) => row.subject as string);
+  }
+
+  /**
+   * Gets all groups that are associated with a specific external subject identifier.
+   */
+  async getGroupsForSubject(subject: string): Promise<FeatureFlagGroup[]> {
+    const sql = `
+      SELECT ${GROUP_COLUMNS.map((c) => `g.${c}`).join(", ")}
+      FROM ${GROUP_TABLE} g
+      INNER JOIN ${GROUP_SUBJECT_TABLE} gs ON g.id = gs.feature_flag_group_id
+      WHERE gs.subject = $1
+      ORDER BY g.created DESC
+    `;
+    const res = await this.db.query(sql, [subject]);
     return res.rows.map(mapGroupRow);
   }
 

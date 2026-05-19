@@ -78,7 +78,7 @@ describe("FeatureFlagCache", () => {
   beforeEach(() => {
     // Create mock model
     mockModel = {
-      isActiveForUser: vi.fn(),
+      isActiveForContext: vi.fn(),
     } as any;
 
     // Create cache
@@ -94,7 +94,7 @@ describe("FeatureFlagCache", () => {
 
   it("should call model on cache miss", async () => {
     const mockResult = true;
-    vi.mocked(mockModel.isActiveForUser).mockResolvedValue(mockResult);
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(mockResult);
 
     const result = await flagCache.isActiveForUser({
       name: "test_flag",
@@ -102,16 +102,16 @@ describe("FeatureFlagCache", () => {
     });
 
     expect(result).toBe(mockResult);
-    expect(mockModel.isActiveForUser).toHaveBeenCalledWith({
+    expect(mockModel.isActiveForContext).toHaveBeenCalledWith({
       name: "test_flag",
       user: "user123",
     });
-    expect(mockModel.isActiveForUser).toHaveBeenCalledTimes(1);
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(1);
   });
 
   it("should return cached result on cache hit", async () => {
     const mockResult = true;
-    vi.mocked(mockModel.isActiveForUser).mockResolvedValue(mockResult);
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(mockResult);
 
     // First call should hit the model
     const result1 = await flagCache.isActiveForUser({
@@ -127,11 +127,11 @@ describe("FeatureFlagCache", () => {
 
     expect(result1).toBe(mockResult);
     expect(result2).toBe(mockResult);
-    expect(mockModel.isActiveForUser).toHaveBeenCalledTimes(1);
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(1);
   });
 
   it("should generate different cache keys for different parameters", async () => {
-    vi.mocked(mockModel.isActiveForUser).mockResolvedValue(true);
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(true);
 
     // Different user
     await flagCache.isActiveForUser({ name: "test_flag", user: "user1" });
@@ -166,11 +166,11 @@ describe("FeatureFlagCache", () => {
     });
 
     // Each call should be a cache miss
-    expect(mockModel.isActiveForUser).toHaveBeenCalledTimes(8);
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(8);
   });
 
   it("should generate same cache key for same parameters regardless of order", async () => {
-    vi.mocked(mockModel.isActiveForUser).mockResolvedValue(true);
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(true);
 
     // Same parameters but different order
     await flagCache.isActiveForUser({
@@ -188,11 +188,11 @@ describe("FeatureFlagCache", () => {
     });
 
     // Should only call model once (second call hits cache)
-    expect(mockModel.isActiveForUser).toHaveBeenCalledTimes(1);
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(1);
   });
 
   it("should handle undefined/null parameters consistently", async () => {
-    vi.mocked(mockModel.isActiveForUser).mockResolvedValue(true);
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(true);
 
     // Test various combinations of undefined parameters
     await flagCache.isActiveForUser({ name: "test_flag" });
@@ -201,11 +201,11 @@ describe("FeatureFlagCache", () => {
     await flagCache.isActiveForUser({ name: "test_flag", groups: undefined });
 
     // All should generate the same cache key
-    expect(mockModel.isActiveForUser).toHaveBeenCalledTimes(1);
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(1);
   });
 
   it("should cache false results as well as true results", async () => {
-    vi.mocked(mockModel.isActiveForUser).mockResolvedValue(false);
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(false);
 
     const result1 = await flagCache.isActiveForUser({
       name: "test_flag",
@@ -218,11 +218,11 @@ describe("FeatureFlagCache", () => {
 
     expect(result1).toBe(false);
     expect(result2).toBe(false);
-    expect(mockModel.isActiveForUser).toHaveBeenCalledTimes(1);
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(1);
   });
 
   it("should respect cache expiration", async () => {
-    vi.mocked(mockModel.isActiveForUser).mockResolvedValue(true);
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(true);
 
     const shortTtlCache = new FeatureFlagCache({
       model: mockModel,
@@ -236,7 +236,7 @@ describe("FeatureFlagCache", () => {
     // Second call within TTL
     await shortTtlCache.isActiveForUser({ name: "test_flag", user: "user1" });
 
-    expect(mockModel.isActiveForUser).toHaveBeenCalledTimes(1);
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(1);
 
     // Wait for cache expiration
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -244,7 +244,22 @@ describe("FeatureFlagCache", () => {
     // Third call after expiration
     await shortTtlCache.isActiveForUser({ name: "test_flag", user: "user1" });
 
-    expect(mockModel.isActiveForUser).toHaveBeenCalledTimes(2);
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(2);
+  });
+
+  it("should include subjects in cache key generation", async () => {
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(true);
+
+    await flagCache.isActiveForContext({
+      name: "subject-flag",
+      subjects: ["tenant:acme"],
+    });
+    await flagCache.isActiveForContext({
+      name: "subject-flag",
+      subjects: ["tenant:beta"],
+    });
+
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(2);
   });
 
   it("should use custom TTL when provided", () => {

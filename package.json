@@ -27,7 +27,7 @@
     "clean": "rm -rf dist",
     "dev": "npx tsc --watch",
     "dev:env": "bash bin/dev/env.sh",
-    "dev:migrate": "npx dotenv-cli -e env -- node-pg-migrate up",
+    "dev:migrate": "npx dotenv-cli -e .env -- node-pg-migrate up -s flapjack --create-schema -t pgmigrations",
     "dev:docker:up": "docker compose -f docker-compose.yml up -d",
     "dev:docker:down": "docker compose -f docker-compose.yml down -v",
     "create-migration": "npx node-pg-migrate create --",

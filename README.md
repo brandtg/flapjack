@@ -9,6 +9,7 @@ A simple feature flags library with PostgreSQL integration, inspired by [django-
 ## Features
 
 - **Multiple targeting strategies**: Enable features for specific users, roles, groups, or percentage rollouts
+- **External subject targeting**: Assign flags (or flag groups) to external subjects like tenants or org IDs
 - **Consistent hashing**: Deterministic user bucketing for A/B testing and experimentation
 - **PostgreSQL-backed**: Reliable, transactional flag storage with your existing database
 - **CLI included**: Manage feature flags from the command line
@@ -63,6 +64,16 @@ const active = await featureFlag.isActiveForUser({
   user: "1234",
 });
 
+// Assign a flag to an external subject ID (for example, a tenant)
+await featureFlags.addSubject(flag.id, "tenant:acme");
+
+// Check if active for a broader context that includes external subject IDs
+const activeForTenant = await featureFlags.isActiveForContext({
+  name: "enable_new_checkout_20250101_gbrandt",
+  user: "1234",
+  subjects: ["tenant:acme"],
+});
+
 // Enable the feature flag for certain roles
 await featureFlags.update(flag.id, {
   roles: ["admin", "staff"],
@@ -101,9 +112,41 @@ When checking if a feature flag is active for a user, Flapjack evaluates rules i
 1. **Everyone Override** (`everyone: true/false`): If set, immediately returns this value, ignoring all other rules
 2. **User List** (`users: [...]`): If the user ID is in this list, returns `true`
 3. **Group Membership** (`groups: [...]`): If the user belongs to any specified group, returns `true`
-4. **Role Membership** (`roles: [...]`): If the user has any specified role, returns `true`
-5. **Percentage Rollout** (`percent: 0-99.9`): Uses consistent hashing to deterministically bucket users
-6. **Default**: Returns `false` if no conditions are met
+4. **External Subject Match** (`subjects: [...]`): If any provided subject matches a direct flag subject or a flag-group subject, returns `true`
+5. **Role Membership** (`roles: [...]`): If the user has any specified role, returns `true`
+6. **Percentage Rollout** (`percent: 0-99.9`): Uses consistent hashing to deterministically bucket users
+7. **Default**: Returns `false` if no conditions are met
+
+## External Subject Targeting
+
+Use subjects when identity/group membership is managed outside Flapjack (for example, tenant IDs from another system).
+
+```typescript
+const groupModel = new FeatureFlagGroupModel(pool);
+const flagModel = new FeatureFlagModel(pool);
+
+const rolloutGroup = await groupModel.create({
+  name: "checkout_rollout",
+});
+
+const checkoutFlag = await flagModel.create({
+  name: "enable_checkout_v2",
+});
+
+await groupModel.addFeatureFlag(rolloutGroup.id, checkoutFlag.id);
+
+// Attach external subject to all flags in this feature flag group
+await groupModel.addSubject(rolloutGroup.id, "tenant:acme");
+
+// You can also attach a subject directly to a single flag
+await flagModel.addSubject(checkoutFlag.id, "tenant:beta");
+
+const isActive = await flagModel.isActiveForContext({
+  name: "enable_checkout_v2",
+  user: "user_123",
+  subjects: ["tenant:acme"],
+});
+```
 
 ### Example Evaluation
 
@@ -347,6 +390,15 @@ flapjack get-by-name my_feature
 # Check if active for a user
 flapjack is-active my_feature --user user123 --roles admin
 
+# Check if multiple flags are active for a user
+flapjack are-active --names my_feature other_feature --user user123 --roles admin
+
+# Check if active for context (with external subject IDs)
+flapjack is-active-context my_feature --user user123 --subjects tenant:acme
+
+# Check multiple flags for context
+flapjack are-active-context --names my_feature other_feature --subjects tenant:acme
+
 # Update a flag
 flapjack update 1 --percent 50 --everyone false
 
@@ -355,6 +407,35 @@ flapjack update 1 --clear-roles --clear-percent
 
 # Delete a flag
 flapjack delete 1
+
+# Add/remove/list subject mappings on a flag
+flapjack add-subject 1 tenant:acme
+flapjack remove-subject 1 tenant:acme
+flapjack list-subjects 1
+flapjack list-by-subject tenant:acme
+
+# Feature flag groups
+flapjack group-create --name checkout_rollout --note "Checkout launch cohort"
+flapjack group-list
+flapjack group-get 1
+flapjack group-get-by-name checkout_rollout
+flapjack group-update 1 --note "Updated"
+flapjack group-delete 1
+
+# Group membership
+flapjack group-add-flag 1 10
+flapjack group-remove-flag 1 10
+flapjack group-list-flags 1
+flapjack group-list-for-flag 10
+
+# Bulk update all flags in a group
+flapjack group-update-all 1 --percent 25 --roles admin
+
+# Group-level subject mappings
+flapjack group-add-subject 1 tenant:acme
+flapjack group-remove-subject 1 tenant:acme
+flapjack group-list-subjects 1
+flapjack group-list-by-subject tenant:acme
 
 # Debug user bucketing
 flapjack hash-user user123

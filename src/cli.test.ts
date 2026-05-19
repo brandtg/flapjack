@@ -195,4 +195,182 @@ describe("CLI smoke", () => {
       DATABASE_URL: TEST_DB_URL,
     });
   });
+
+  it("supports subject and group CLI workflows", async () => {
+    const createRes = await runCli(
+      [
+        "create",
+        "--name",
+        "cli-subject-flag",
+        "--roles",
+        "admin",
+        "--note",
+        "subject flow",
+      ],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(createRes.code).toBe(0);
+    const flag = JSON.parse(createRes.stdout.trim());
+
+    const addSubjectRes = await runCli(
+      ["add-subject", String(flag.id), "tenant:acme"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(addSubjectRes.code).toBe(0);
+    expect(JSON.parse(addSubjectRes.stdout.trim()).added).toBe(true);
+
+    const listSubjectsRes = await runCli(["list-subjects", String(flag.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(listSubjectsRes.code).toBe(0);
+    expect(JSON.parse(listSubjectsRes.stdout.trim()).subjects).toContain(
+      "tenant:acme",
+    );
+
+    const isActiveContextRes = await runCli(
+      ["is-active-context", "cli-subject-flag", "--subjects", "tenant:acme"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(isActiveContextRes.code).toBe(0);
+    expect(JSON.parse(isActiveContextRes.stdout.trim()).isActive).toBe(true);
+
+    const areActiveUserRes = await runCli(
+      ["are-active", "--names", "cli-subject-flag", "--roles", "admin"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(areActiveUserRes.code).toBe(0);
+    const areActiveUserPayload = JSON.parse(areActiveUserRes.stdout.trim());
+    expect(areActiveUserPayload.results["cli-subject-flag"]).toBe(true);
+
+    const areActiveContextRes = await runCli(
+      [
+        "are-active-context",
+        "--names",
+        "cli-subject-flag",
+        "--subjects",
+        "tenant:acme",
+      ],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(areActiveContextRes.code).toBe(0);
+    const areActiveContextPayload = JSON.parse(
+      areActiveContextRes.stdout.trim(),
+    );
+    expect(areActiveContextPayload.results["cli-subject-flag"]).toBe(true);
+
+    const listBySubjectRes = await runCli(["list-by-subject", "tenant:acme"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(listBySubjectRes.code).toBe(0);
+    const listBySubjectPayload = JSON.parse(listBySubjectRes.stdout.trim());
+    expect(listBySubjectPayload.flags.map((f: any) => f.id)).toContain(flag.id);
+
+    const groupCreateRes = await runCli(
+      ["group-create", "--name", "cli-subject-group", "--note", "group flow"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupCreateRes.code).toBe(0);
+    const group = JSON.parse(groupCreateRes.stdout.trim());
+
+    const groupAddFlagRes = await runCli(
+      ["group-add-flag", String(group.id), String(flag.id)],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupAddFlagRes.code).toBe(0);
+    expect(JSON.parse(groupAddFlagRes.stdout.trim()).added).toBe(true);
+
+    const groupAddSubjectRes = await runCli(
+      ["group-add-subject", String(group.id), "tenant:beta"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupAddSubjectRes.code).toBe(0);
+    expect(JSON.parse(groupAddSubjectRes.stdout.trim()).added).toBe(true);
+
+    const groupListSubjectsRes = await runCli(
+      ["group-list-subjects", String(group.id)],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupListSubjectsRes.code).toBe(0);
+    expect(JSON.parse(groupListSubjectsRes.stdout.trim()).subjects).toContain(
+      "tenant:beta",
+    );
+
+    const groupListBySubjectRes = await runCli(
+      ["group-list-by-subject", "tenant:beta"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupListBySubjectRes.code).toBe(0);
+    const groupListBySubjectPayload = JSON.parse(
+      groupListBySubjectRes.stdout.trim(),
+    );
+    expect(groupListBySubjectPayload.groups.map((g: any) => g.id)).toContain(
+      group.id,
+    );
+
+    const groupListFlagsRes = await runCli(
+      ["group-list-flags", String(group.id)],
+      {
+        DATABASE_URL: TEST_DB_URL,
+      },
+    );
+    expect(groupListFlagsRes.code).toBe(0);
+    expect(
+      JSON.parse(groupListFlagsRes.stdout.trim()).flags.map((f: any) => f.id),
+    ).toContain(flag.id);
+
+    const groupListForFlagRes = await runCli(
+      ["group-list-for-flag", String(flag.id)],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupListForFlagRes.code).toBe(0);
+    expect(
+      JSON.parse(groupListForFlagRes.stdout.trim()).groups.map(
+        (g: any) => g.id,
+      ),
+    ).toContain(group.id);
+
+    const groupUpdateAllRes = await runCli(
+      ["group-update-all", String(group.id), "--everyone", "false"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupUpdateAllRes.code).toBe(0);
+    expect(
+      JSON.parse(groupUpdateAllRes.stdout.trim()).updatedCount,
+    ).toBeGreaterThan(0);
+
+    const contextAfterUpdateRes = await runCli(
+      ["is-active-context", "cli-subject-flag", "--subjects", "tenant:acme"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(contextAfterUpdateRes.code).toBe(0);
+    expect(JSON.parse(contextAfterUpdateRes.stdout.trim()).isActive).toBe(
+      false,
+    );
+
+    const removeSubjectRes = await runCli(
+      ["remove-subject", String(flag.id), "tenant:acme"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(removeSubjectRes.code).toBe(0);
+    expect(JSON.parse(removeSubjectRes.stdout.trim()).removed).toBe(true);
+
+    const groupRemoveSubjectRes = await runCli(
+      ["group-remove-subject", String(group.id), "tenant:beta"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupRemoveSubjectRes.code).toBe(0);
+    expect(JSON.parse(groupRemoveSubjectRes.stdout.trim()).removed).toBe(true);
+
+    const groupRemoveFlagRes = await runCli(
+      ["group-remove-flag", String(group.id), String(flag.id)],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupRemoveFlagRes.code).toBe(0);
+    expect(JSON.parse(groupRemoveFlagRes.stdout.trim()).removed).toBe(true);
+
+    const groupDeleteRes = await runCli(["group-delete", String(group.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(groupDeleteRes.code).toBe(0);
+  });
 });

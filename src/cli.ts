@@ -3,7 +3,7 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import { Pool } from "pg";
-import { FeatureFlagModel } from "./model.js";
+import { FeatureFlagModel, FeatureFlagGroupModel } from "./model.js";
 import dotenv from "dotenv";
 
 dotenv.config({ quiet: true });
@@ -364,6 +364,948 @@ cli.command(
       );
     } catch (error) {
       console.error("Error checking feature flag:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Check multiple flags for user command
+cli.command(
+  "are-active",
+  "Check if multiple feature flags are active for a user",
+  (yargs) => {
+    return yargs.options({
+      names: {
+        type: "array",
+        describe: "Optional list of feature flag names (defaults to all flags)",
+      },
+      user: {
+        type: "string",
+        describe: "User ID",
+      },
+      roles: {
+        type: "array",
+        describe: "User roles",
+      },
+      groups: {
+        type: "array",
+        describe: "User groups",
+      },
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagModel(db);
+
+    try {
+      const results = await model.areActiveForUser({
+        names: argv.names as string[] | undefined,
+        user: argv.user,
+        roles: argv.roles as string[],
+        groups: argv.groups as string[],
+      });
+
+      console.log(
+        JSON.stringify(
+          {
+            names: argv.names,
+            user: argv.user,
+            roles: argv.roles,
+            groups: argv.groups,
+            results,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error checking multiple feature flags:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Check if active for context command
+cli.command(
+  "is-active-context <name>",
+  "Check if a feature flag is active for a context including subjects",
+  (yargs) => {
+    return yargs
+      .positional("name", {
+        type: "string",
+        describe: "Feature flag name",
+      })
+      .options({
+        user: {
+          type: "string",
+          describe: "User ID",
+        },
+        roles: {
+          type: "array",
+          describe: "User roles",
+        },
+        groups: {
+          type: "array",
+          describe: "User groups",
+        },
+        subjects: {
+          type: "array",
+          describe: "External subject IDs (for example tenant:acme)",
+        },
+      });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagModel(db);
+
+    try {
+      const isActive = await model.isActiveForContext({
+        name: argv.name!,
+        user: argv.user,
+        roles: argv.roles as string[],
+        groups: argv.groups as string[],
+        subjects: argv.subjects as string[],
+      });
+
+      console.log(
+        JSON.stringify(
+          {
+            name: argv.name,
+            isActive,
+            user: argv.user,
+            roles: argv.roles,
+            groups: argv.groups,
+            subjects: argv.subjects,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error checking feature flag context:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Add a subject to a feature flag
+cli.command(
+  "add-subject <id> <subject>",
+  "Add an external subject ID to a feature flag",
+  (yargs) => {
+    return yargs
+      .positional("id", {
+        type: "number",
+        describe: "Feature flag ID",
+      })
+      .positional("subject", {
+        type: "string",
+        describe: "External subject ID (for example tenant:acme)",
+      });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagModel(db);
+
+    try {
+      const added = await model.addSubject(argv.id!, argv.subject!);
+      console.log(
+        JSON.stringify(
+          {
+            id: argv.id,
+            subject: argv.subject,
+            added,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error adding subject:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Remove a subject from a feature flag
+cli.command(
+  "remove-subject <id> <subject>",
+  "Remove an external subject ID from a feature flag",
+  (yargs) => {
+    return yargs
+      .positional("id", {
+        type: "number",
+        describe: "Feature flag ID",
+      })
+      .positional("subject", {
+        type: "string",
+        describe: "External subject ID",
+      });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagModel(db);
+
+    try {
+      const removed = await model.removeSubject(argv.id!, argv.subject!);
+      console.log(
+        JSON.stringify(
+          {
+            id: argv.id,
+            subject: argv.subject,
+            removed,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error removing subject:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// List subjects for a feature flag
+cli.command(
+  "list-subjects <id>",
+  "List external subject IDs for a feature flag",
+  (yargs) => {
+    return yargs.positional("id", {
+      type: "number",
+      describe: "Feature flag ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagModel(db);
+
+    try {
+      const subjects = await model.getSubjects(argv.id!);
+      console.log(
+        JSON.stringify(
+          {
+            id: argv.id,
+            subjects,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error listing subjects:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Check multiple flags for context command
+cli.command(
+  "are-active-context",
+  "Check if multiple feature flags are active for a context including subjects",
+  (yargs) => {
+    return yargs.options({
+      names: {
+        type: "array",
+        describe: "Optional list of feature flag names (defaults to all flags)",
+      },
+      user: {
+        type: "string",
+        describe: "User ID",
+      },
+      roles: {
+        type: "array",
+        describe: "User roles",
+      },
+      groups: {
+        type: "array",
+        describe: "User groups",
+      },
+      subjects: {
+        type: "array",
+        describe: "External subject IDs (for example tenant:acme)",
+      },
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagModel(db);
+
+    try {
+      const results = await model.areActiveForContext({
+        names: argv.names as string[] | undefined,
+        user: argv.user,
+        roles: argv.roles as string[],
+        groups: argv.groups as string[],
+        subjects: argv.subjects as string[],
+      });
+
+      console.log(
+        JSON.stringify(
+          {
+            names: argv.names,
+            user: argv.user,
+            roles: argv.roles,
+            groups: argv.groups,
+            subjects: argv.subjects,
+            results,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error checking multiple feature flag contexts:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// List flags that directly match a subject
+cli.command(
+  "list-by-subject <subject>",
+  "List feature flags directly assigned to an external subject ID",
+  (yargs) => {
+    return yargs.positional("subject", {
+      type: "string",
+      describe: "External subject ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagModel(db);
+
+    try {
+      const flags = await model.getFeatureFlagsForSubject(argv.subject!);
+      console.log(
+        JSON.stringify(
+          {
+            subject: argv.subject,
+            flags,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error listing flags by subject:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Create feature flag group command
+cli.command(
+  "group-create",
+  "Create a feature flag group",
+  (yargs) => {
+    return yargs
+      .options({
+        name: {
+          type: "string",
+          describe: "Feature flag group name",
+        },
+        note: {
+          type: "string",
+          describe: "Feature flag group description",
+        },
+      })
+      .demandOption("name", "Feature flag group name is required");
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const group = await model.create({
+        name: argv.name!,
+        note: argv.note,
+      });
+      console.log(JSON.stringify(group, null, 2));
+    } catch (error) {
+      console.error("Error creating feature flag group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// List feature flag groups command
+cli.command(
+  "group-list",
+  "List all feature flag groups",
+  () => {},
+  async () => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const groups = await model.list();
+      console.log(JSON.stringify(groups, null, 2));
+    } catch (error) {
+      console.error("Error listing feature flag groups:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Get feature flag group by ID command
+cli.command(
+  "group-get <id>",
+  "Get a feature flag group by ID",
+  (yargs) => {
+    return yargs.positional("id", {
+      type: "number",
+      describe: "Feature flag group ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const group = await model.getById(argv.id!);
+      if (!group) {
+        console.log(`Feature flag group with ID ${argv.id} not found`);
+        process.exit(1);
+      }
+      console.log(JSON.stringify(group, null, 2));
+    } catch (error) {
+      console.error("Error getting feature flag group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Get feature flag group by name command
+cli.command(
+  "group-get-by-name <name>",
+  "Get a feature flag group by name",
+  (yargs) => {
+    return yargs.positional("name", {
+      type: "string",
+      describe: "Feature flag group name",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const group = await model.getByName(argv.name!);
+      if (!group) {
+        console.log(`Feature flag group with name "${argv.name}" not found`);
+        process.exit(1);
+      }
+      console.log(JSON.stringify(group, null, 2));
+    } catch (error) {
+      console.error("Error getting feature flag group by name:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Update feature flag group command
+cli.command(
+  "group-update <id>",
+  "Update a feature flag group",
+  (yargs) => {
+    return yargs
+      .positional("id", {
+        type: "number",
+        describe: "Feature flag group ID",
+      })
+      .options({
+        name: {
+          type: "string",
+          describe: "Feature flag group name",
+        },
+        note: {
+          type: "string",
+          describe: "Feature flag group description",
+        },
+        "clear-note": {
+          type: "boolean",
+          describe: "Clear the group note",
+        },
+      });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const changes: any = {};
+      if (argv.name !== undefined) changes.name = argv.name;
+      if ((argv as any).clearNote) changes.note = null;
+      else if (argv.note !== undefined) changes.note = argv.note;
+
+      const group = await model.update(argv.id!, changes);
+      if (!group) {
+        console.log(`Feature flag group with ID ${argv.id} not found`);
+        process.exit(1);
+      }
+      console.log(JSON.stringify(group, null, 2));
+    } catch (error) {
+      console.error("Error updating feature flag group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Delete feature flag group command
+cli.command(
+  "group-delete <id>",
+  "Delete a feature flag group",
+  (yargs) => {
+    return yargs.positional("id", {
+      type: "number",
+      describe: "Feature flag group ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const deleted = await model.delete(argv.id!);
+      if (!deleted) {
+        console.log(`Feature flag group with ID ${argv.id} not found`);
+        process.exit(1);
+      }
+      console.log(`Feature flag group with ID ${argv.id} deleted successfully`);
+    } catch (error) {
+      console.error("Error deleting feature flag group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Add flag to feature flag group command
+cli.command(
+  "group-add-flag <groupId> <flagId>",
+  "Add a feature flag to a group",
+  (yargs) => {
+    return yargs
+      .positional("groupId", {
+        type: "number",
+        describe: "Feature flag group ID",
+      })
+      .positional("flagId", {
+        type: "number",
+        describe: "Feature flag ID",
+      });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const added = await model.addFeatureFlag(argv.groupId!, argv.flagId!);
+      console.log(
+        JSON.stringify(
+          {
+            groupId: argv.groupId,
+            flagId: argv.flagId,
+            added,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error adding feature flag to group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Remove flag from feature flag group command
+cli.command(
+  "group-remove-flag <groupId> <flagId>",
+  "Remove a feature flag from a group",
+  (yargs) => {
+    return yargs
+      .positional("groupId", {
+        type: "number",
+        describe: "Feature flag group ID",
+      })
+      .positional("flagId", {
+        type: "number",
+        describe: "Feature flag ID",
+      });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const removed = await model.removeFeatureFlag(
+        argv.groupId!,
+        argv.flagId!,
+      );
+      console.log(
+        JSON.stringify(
+          {
+            groupId: argv.groupId,
+            flagId: argv.flagId,
+            removed,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error removing feature flag from group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// List flags in feature flag group command
+cli.command(
+  "group-list-flags <groupId>",
+  "List all feature flags in a group",
+  (yargs) => {
+    return yargs.positional("groupId", {
+      type: "number",
+      describe: "Feature flag group ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const flags = await model.getFeatureFlags(argv.groupId!);
+      console.log(
+        JSON.stringify(
+          {
+            groupId: argv.groupId,
+            flags,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error listing flags for group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// List groups for feature flag command
+cli.command(
+  "group-list-for-flag <flagId>",
+  "List all groups that contain a feature flag",
+  (yargs) => {
+    return yargs.positional("flagId", {
+      type: "number",
+      describe: "Feature flag ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const groups = await model.getGroupsForFeatureFlag(argv.flagId!);
+      console.log(
+        JSON.stringify(
+          {
+            flagId: argv.flagId,
+            groups,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error listing groups for feature flag:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Bulk update flags in a group command
+cli.command(
+  "group-update-all <groupId>",
+  "Update all feature flags in a group",
+  (yargs) => {
+    return yargs
+      .positional("groupId", {
+        type: "number",
+        describe: "Feature flag group ID",
+      })
+      .options({
+        everyone: {
+          type: "boolean",
+          describe: "Enable flag for everyone (overrides all other settings)",
+        },
+        percent: {
+          type: "number",
+          describe: "Percentage rollout (0-99.9)",
+        },
+        roles: {
+          type: "array",
+          describe: "List of roles that have this flag enabled",
+        },
+        groups: {
+          type: "array",
+          describe: "List of user groups that have this flag enabled",
+        },
+        users: {
+          type: "array",
+          describe: "List of specific user IDs that have this flag enabled",
+        },
+        "clear-everyone": {
+          type: "boolean",
+          describe: "Unset the everyone override",
+        },
+        "clear-percent": {
+          type: "boolean",
+          describe: "Unset percentage rollout",
+        },
+        "clear-roles": {
+          type: "boolean",
+          describe: "Clear roles list",
+        },
+        "clear-groups": {
+          type: "boolean",
+          describe: "Clear groups list",
+        },
+        "clear-users": {
+          type: "boolean",
+          describe: "Clear users list",
+        },
+      });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const changes: any = {};
+
+      if ((argv as any).clearEveryone) changes.everyone = null;
+      else if (argv.everyone !== undefined) changes.everyone = argv.everyone;
+
+      if ((argv as any).clearPercent) changes.percent = null;
+      else if (argv.percent !== undefined) changes.percent = argv.percent;
+
+      if ((argv as any).clearRoles) changes.roles = null;
+      else if (argv.roles !== undefined) changes.roles = argv.roles as string[];
+
+      if ((argv as any).clearGroups) changes.groups = null;
+      else if (argv.groups !== undefined)
+        changes.groups = argv.groups as string[];
+
+      if ((argv as any).clearUsers) changes.users = null;
+      else if (argv.users !== undefined) changes.users = argv.users as string[];
+
+      const updatedCount = await model.updateAll(argv.groupId!, changes);
+
+      console.log(
+        JSON.stringify(
+          {
+            groupId: argv.groupId,
+            updatedCount,
+            changes,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error updating all flags in group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Add subject to feature flag group command
+cli.command(
+  "group-add-subject <groupId> <subject>",
+  "Add an external subject ID to a feature flag group",
+  (yargs) => {
+    return yargs
+      .positional("groupId", {
+        type: "number",
+        describe: "Feature flag group ID",
+      })
+      .positional("subject", {
+        type: "string",
+        describe: "External subject ID",
+      });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const added = await model.addSubject(argv.groupId!, argv.subject!);
+      console.log(
+        JSON.stringify(
+          {
+            groupId: argv.groupId,
+            subject: argv.subject,
+            added,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error adding subject to group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Remove subject from feature flag group command
+cli.command(
+  "group-remove-subject <groupId> <subject>",
+  "Remove an external subject ID from a feature flag group",
+  (yargs) => {
+    return yargs
+      .positional("groupId", {
+        type: "number",
+        describe: "Feature flag group ID",
+      })
+      .positional("subject", {
+        type: "string",
+        describe: "External subject ID",
+      });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const removed = await model.removeSubject(argv.groupId!, argv.subject!);
+      console.log(
+        JSON.stringify(
+          {
+            groupId: argv.groupId,
+            subject: argv.subject,
+            removed,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error removing subject from group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// List subjects for feature flag group command
+cli.command(
+  "group-list-subjects <groupId>",
+  "List external subject IDs for a feature flag group",
+  (yargs) => {
+    return yargs.positional("groupId", {
+      type: "number",
+      describe: "Feature flag group ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const subjects = await model.getSubjects(argv.groupId!);
+      console.log(
+        JSON.stringify(
+          {
+            groupId: argv.groupId,
+            subjects,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error listing subjects for group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// List groups for subject command
+cli.command(
+  "group-list-by-subject <subject>",
+  "List feature flag groups assigned to an external subject ID",
+  (yargs) => {
+    return yargs.positional("subject", {
+      type: "string",
+      describe: "External subject ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const groups = await model.getGroupsForSubject(argv.subject!);
+      console.log(
+        JSON.stringify(
+          {
+            subject: argv.subject,
+            groups,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error("Error listing groups by subject:", error);
       process.exit(1);
     } finally {
       await db.end();
