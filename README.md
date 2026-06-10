@@ -372,21 +372,21 @@ await featureFlags.update(flagId, { percent: 100 });
 
 Creates a new feature flag.
 
-#### `getById(id: number): Promise<FeatureFlag | null>`
+#### `getById(id: number, options?: { includeArchived?: boolean }): Promise<FeatureFlag | null>`
 
-Retrieves a feature flag by its ID.
+Retrieves a feature flag by its ID. Archived flags are excluded unless `includeArchived` is `true`.
 
-#### `getByName(name: string): Promise<FeatureFlag | null>`
+#### `getByName(name: string, options?: { includeArchived?: boolean }): Promise<FeatureFlag | null>`
 
-Retrieves a feature flag by its name.
+Retrieves a feature flag by its name. Archived flags are excluded unless `includeArchived` is `true`.
 
-#### `list(): Promise<FeatureFlag[]>`
+#### `list(options?: { includeArchived?: boolean }): Promise<FeatureFlag[]>`
 
-Lists all feature flags, ordered by ID.
+Lists all feature flags, ordered by ID. Archived flags are excluded unless `includeArchived` is `true`.
 
-#### `listByTag(tag: string): Promise<FeatureFlag[]>`
+#### `listByTag(tag: string, options?: { includeArchived?: boolean }): Promise<FeatureFlag[]>`
 
-Lists all feature flags carrying the given tag (exact match), ordered by ID.
+Lists all feature flags carrying the given tag (exact match), ordered by ID. Archived flags are excluded unless `includeArchived` is `true`.
 
 #### `update(id: number, changes: UpdateChanges): Promise<FeatureFlag | null>`
 
@@ -394,7 +394,13 @@ Updates a feature flag. Returns the updated flag or null if not found.
 
 #### `delete(id: number): Promise<boolean>`
 
-Deletes a feature flag. Returns true if deleted, false if not found.
+Permanently deletes a feature flag and all its relationships. Returns true if deleted, false if not found. To hide a flag while keeping its history, use `archive` instead.
+
+#### `archive(id: number): Promise<FeatureFlag | null>`
+
+Archives (hides) a feature flag while keeping the row for historical/audit purposes. Archived flags are excluded from normal reads and evaluate as inactive, but remain retrievable via `{ includeArchived: true }`. Returns the archived flag, or null if it does not exist or is already archived.
+
+Archiving is **irreversible** (there is no `unarchive`) and the `archived` timestamp is immutable once set. The flag's name stays reserved permanently — a new flag cannot reuse it; create a new flag with a different name instead. The same `archive(id)` / `includeArchived` semantics apply to `FeatureFlagGroupModel`.
 
 #### `isActiveForUser(params): Promise<boolean>`
 
@@ -417,6 +423,10 @@ flapjack create --name my_feature --roles admin --note "Admin-only feature"
 
 # List all flags
 flapjack list
+
+# Include archived (hidden) flags in any read command
+flapjack list --include-archived
+flapjack get-by-name my_feature --include-archived
 
 # List flags carrying a tag (e.g. a release version)
 flapjack list-by-tag release:1.5.0
@@ -442,8 +452,11 @@ flapjack update 1 --percent 50 --everyone false
 # Clear specific fields
 flapjack update 1 --clear-roles --clear-percent
 
-# Delete a flag
+# Delete a flag (permanent — destroys all metadata)
 flapjack delete 1
+
+# Archive a flag (hide it but keep its history; irreversible)
+flapjack archive 1
 
 # Add/remove/list subject mappings on a flag
 flapjack add-subject 1 tenant:acme
@@ -458,6 +471,7 @@ flapjack group-get 1
 flapjack group-get-by-name checkout_rollout
 flapjack group-update 1 --note "Updated"
 flapjack group-delete 1
+flapjack group-archive 1
 
 # Group membership
 flapjack group-add-flag 1 10
@@ -527,8 +541,11 @@ await featureFlags.update(flagId, { percent: 10 });
 await featureFlags.update(flagId, { everyone: true });
 
 // 5. Cleanup (after feature is stable)
-// Remove feature flag checks from code
-await featureFlags.delete(flagId);
+// Remove feature flag checks from code, then either:
+//   - delete to remove it entirely, or
+//   - archive to hide it while keeping its history for audit
+await featureFlags.archive(flagId);
+// (archive is irreversible and the name stays reserved permanently)
 ```
 
 ### Error Handling

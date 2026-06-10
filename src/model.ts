@@ -28,10 +28,16 @@ const COLUMNS = [
   "created",
   "modified",
   "expires",
+  "archived",
 ] as const;
 
-type CreateInput = Omit<FeatureFlag, "id" | "created" | "modified">;
-type UpdateChanges = Partial<Omit<FeatureFlag, "id" | "created" | "modified">>;
+type CreateInput = Omit<
+  FeatureFlag,
+  "id" | "created" | "modified" | "archived"
+>;
+type UpdateChanges = Partial<
+  Omit<FeatureFlag, "id" | "created" | "modified" | "archived">
+>;
 
 function mapRow(row: any): FeatureFlag {
   return {
@@ -55,6 +61,7 @@ function mapRow(row: any): FeatureFlag {
     created: new Date(row.created),
     modified: new Date(row.modified),
     expires: row.expires ? new Date(row.expires) : undefined,
+    archived: row.archived ? new Date(row.archived) : undefined,
   };
 }
 
@@ -174,8 +181,12 @@ export class FeatureFlagModel {
    * }
    * ```
    */
-  async getById(id: number): Promise<FeatureFlag | null> {
-    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE id = $1`;
+  async getById(
+    id: number,
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlag | null> {
+    const filter = includeArchived ? "" : " AND archived IS NULL";
+    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE id = $1${filter}`;
     const res = await this.db.query(sql, [id]);
     if (res.rows.length === 0) return null;
     return mapRow(res.rows[0]);
@@ -195,8 +206,12 @@ export class FeatureFlagModel {
    * }
    * ```
    */
-  async getByName(name: string): Promise<FeatureFlag | null> {
-    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE name = $1`;
+  async getByName(
+    name: string,
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlag | null> {
+    const filter = includeArchived ? "" : " AND archived IS NULL";
+    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE name = $1${filter}`;
     const res = await this.db.query(sql, [name]);
     if (res.rows.length === 0) return null;
     return mapRow(res.rows[0]);
@@ -214,9 +229,13 @@ export class FeatureFlagModel {
    * console.log(`Found ${flags.length} flags`);
    * ```
    */
-  async getManyByName(names: string[]): Promise<FeatureFlag[]> {
+  async getManyByName(
+    names: string[],
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlag[]> {
     if (names.length === 0) return [];
-    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE name = ANY($1)`;
+    const filter = includeArchived ? "" : " AND archived IS NULL";
+    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE name = ANY($1)${filter}`;
     const res = await this.db.query(sql, [names]);
     return res.rows.map(mapRow);
   }
@@ -233,10 +252,14 @@ export class FeatureFlagModel {
    * console.log(`Found ${flags.length} flags`);
    * ```
    */
-  async getMany(ids: number[]): Promise<FeatureFlag[]> {
+  async getMany(
+    ids: number[],
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlag[]> {
     if (ids.length === 0) return [];
 
-    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE id = ANY($1)`;
+    const filter = includeArchived ? "" : " AND archived IS NULL";
+    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE id = ANY($1)${filter}`;
     const res = await this.db.query(sql, [ids]);
     return res.rows.map(mapRow);
   }
@@ -255,8 +278,11 @@ export class FeatureFlagModel {
    * });
    * ```
    */
-  async list(): Promise<FeatureFlag[]> {
-    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} ORDER BY id`;
+  async list({
+    includeArchived = false,
+  }: { includeArchived?: boolean } = {}): Promise<FeatureFlag[]> {
+    const filter = includeArchived ? "" : " WHERE archived IS NULL";
+    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE}${filter} ORDER BY id`;
     const res = await this.db.query(sql);
     return res.rows.map(mapRow);
   }
@@ -273,8 +299,12 @@ export class FeatureFlagModel {
    * const flags = await model.listByTag("release:1.5.0");
    * ```
    */
-  async listByTag(tag: string): Promise<FeatureFlag[]> {
-    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE $1 = ANY(tags) ORDER BY id`;
+  async listByTag(
+    tag: string,
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlag[]> {
+    const filter = includeArchived ? "" : " AND archived IS NULL";
+    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE $1 = ANY(tags)${filter} ORDER BY id`;
     const res = await this.db.query(sql, [tag]);
     return res.rows.map(mapRow);
   }
@@ -360,10 +390,15 @@ export class FeatureFlagModel {
   }
 
   /**
-   * Deletes a feature flag from the database.
+   * Permanently deletes a feature flag from the database, including its
+   * subject and group-member relationships (via ON DELETE CASCADE).
    *
    * @param id - The unique identifier of the feature flag to delete
    * @returns true if the flag was deleted, false if not found
+   *
+   * @remarks
+   * This is a hard delete that destroys all metadata. To hide a flag while
+   * retaining its history for audit purposes, use {@link archive} instead.
    *
    * @example
    * ```typescript
@@ -376,6 +411,36 @@ export class FeatureFlagModel {
   async delete(id: number): Promise<boolean> {
     const res = await this.db.query(`DELETE FROM ${TABLE} WHERE id = $1`, [id]);
     return (res as any).rowCount > 0;
+  }
+
+  /**
+   * Archives (hides) a feature flag while keeping the row for historical/audit
+   * purposes. Archived flags are excluded from normal reads and evaluation
+   * (an archived flag evaluates to inactive), but can still be retrieved by
+   * passing `{ includeArchived: true }` to the read methods.
+   *
+   * @param id - The unique identifier of the feature flag to archive
+   * @returns The archived feature flag, or null if it does not exist or is already archived
+   *
+   * @remarks
+   * Archiving is irreversible: there is intentionally no `unarchive` method.
+   * The `archived` timestamp is set once and never changed (a second call is a
+   * no-op that returns null). The flag's name remains reserved permanently, so
+   * a new flag cannot reuse it — create a new flag with a different name.
+   *
+   * @example
+   * ```typescript
+   * const archived = await model.archive(flagId);
+   * if (archived) {
+   *   console.log(`Archived at ${archived.archived}`);
+   * }
+   * ```
+   */
+  async archive(id: number): Promise<FeatureFlag | null> {
+    const sql = `UPDATE ${TABLE} SET archived = now() WHERE id = $1 AND archived IS NULL RETURNING ${COLUMNS.join(", ")}`;
+    const res = await this.db.query(sql, [id]);
+    if (res.rows.length === 0) return null;
+    return mapRow(res.rows[0]);
   }
 
   /**
@@ -418,12 +483,16 @@ export class FeatureFlagModel {
   /**
    * Gets all feature flags directly associated with an external subject identifier.
    */
-  async getFeatureFlagsForSubject(subject: string): Promise<FeatureFlag[]> {
+  async getFeatureFlagsForSubject(
+    subject: string,
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlag[]> {
+    const filter = includeArchived ? "" : " AND f.archived IS NULL";
     const sql = `
       SELECT ${COLUMNS.map((c) => `f.${c}`).join(", ")}
       FROM ${TABLE} f
       INNER JOIN ${SUBJECT_TABLE} s ON f.id = s.feature_flag_id
-      WHERE s.subject = $1
+      WHERE s.subject = $1${filter}
       ORDER BY f.created DESC
     `;
     const res = await this.db.query(sql, [subject]);
@@ -437,15 +506,20 @@ export class FeatureFlagModel {
       return new Set<number>();
     }
 
+    // Archived flags and archived groups do not contribute subject-based
+    // targeting: a flag matched directly must itself be active, and a flag
+    // matched via group membership must belong to an active group.
     const sql = `
       SELECT s.feature_flag_id AS feature_flag_id
       FROM ${SUBJECT_TABLE} s
-      WHERE s.subject = ANY($1)
+      INNER JOIN ${TABLE} f ON f.id = s.feature_flag_id
+      WHERE s.subject = ANY($1) AND f.archived IS NULL
       UNION
       SELECT gm.feature_flag_id AS feature_flag_id
       FROM ${GROUP_SUBJECT_TABLE} gs
       INNER JOIN ${GROUP_MEMBER_TABLE} gm ON gs.feature_flag_group_id = gm.group_id
-      WHERE gs.subject = ANY($1)
+      INNER JOIN ${GROUP_TABLE} g ON g.id = gs.feature_flag_group_id
+      WHERE gs.subject = ANY($1) AND g.archived IS NULL
     `;
     const res = await this.db.query(sql, [subjects]);
     return new Set(res.rows.map((row: any) => Number(row.feature_flag_id)));
@@ -817,11 +891,21 @@ export class FeatureFlagModel {
 const GROUP_TABLE = "flapjack.feature_flag_group";
 const GROUP_MEMBER_TABLE = "flapjack.feature_flag_group_member";
 
-const GROUP_COLUMNS = ["id", "name", "note", "created", "modified"] as const;
+const GROUP_COLUMNS = [
+  "id",
+  "name",
+  "note",
+  "created",
+  "modified",
+  "archived",
+] as const;
 
-type CreateGroupInput = Omit<FeatureFlagGroup, "id" | "created" | "modified">;
+type CreateGroupInput = Omit<
+  FeatureFlagGroup,
+  "id" | "created" | "modified" | "archived"
+>;
 type UpdateGroupChanges = Partial<
-  Omit<FeatureFlagGroup, "id" | "created" | "modified">
+  Omit<FeatureFlagGroup, "id" | "created" | "modified" | "archived">
 >;
 type UpdateAllChanges = Partial<
   Pick<FeatureFlag, "everyone" | "percent" | "roles" | "groups" | "users">
@@ -834,6 +918,7 @@ function mapGroupRow(row: any): FeatureFlagGroup {
     note: row.note ?? undefined,
     created: new Date(row.created),
     modified: new Date(row.modified),
+    archived: row.archived ? new Date(row.archived) : undefined,
   };
 }
 
@@ -916,8 +1001,12 @@ export class FeatureFlagGroupModel {
    * }
    * ```
    */
-  async getById(id: number): Promise<FeatureFlagGroup | null> {
-    const sql = `SELECT ${GROUP_COLUMNS.join(", ")} FROM ${GROUP_TABLE} WHERE id = $1`;
+  async getById(
+    id: number,
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlagGroup | null> {
+    const filter = includeArchived ? "" : " AND archived IS NULL";
+    const sql = `SELECT ${GROUP_COLUMNS.join(", ")} FROM ${GROUP_TABLE} WHERE id = $1${filter}`;
     const res = await this.db.query(sql, [id]);
     return res.rows.length > 0 ? mapGroupRow(res.rows[0]) : null;
   }
@@ -933,8 +1022,12 @@ export class FeatureFlagGroupModel {
    * const group = await model.getByName("billing_redesign");
    * ```
    */
-  async getByName(name: string): Promise<FeatureFlagGroup | null> {
-    const sql = `SELECT ${GROUP_COLUMNS.join(", ")} FROM ${GROUP_TABLE} WHERE name = $1`;
+  async getByName(
+    name: string,
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlagGroup | null> {
+    const filter = includeArchived ? "" : " AND archived IS NULL";
+    const sql = `SELECT ${GROUP_COLUMNS.join(", ")} FROM ${GROUP_TABLE} WHERE name = $1${filter}`;
     const res = await this.db.query(sql, [name]);
     return res.rows.length > 0 ? mapGroupRow(res.rows[0]) : null;
   }
@@ -952,8 +1045,11 @@ export class FeatureFlagGroupModel {
    * }
    * ```
    */
-  async list(): Promise<FeatureFlagGroup[]> {
-    const sql = `SELECT ${GROUP_COLUMNS.join(", ")} FROM ${GROUP_TABLE} ORDER BY created DESC`;
+  async list({
+    includeArchived = false,
+  }: { includeArchived?: boolean } = {}): Promise<FeatureFlagGroup[]> {
+    const filter = includeArchived ? "" : " WHERE archived IS NULL";
+    const sql = `SELECT ${GROUP_COLUMNS.join(", ")} FROM ${GROUP_TABLE}${filter} ORDER BY created DESC`;
     const res = await this.db.query(sql);
     return res.rows.map(mapGroupRow);
   }
@@ -1003,10 +1099,15 @@ export class FeatureFlagGroupModel {
   }
 
   /**
-   * Deletes a feature flag group and all its member relationships.
+   * Permanently deletes a feature flag group and all its member and subject
+   * relationships (via ON DELETE CASCADE).
    *
    * @param id - The group ID to delete
    * @returns true if deleted, false if not found
+   *
+   * @remarks
+   * This is a hard delete that destroys all metadata. To hide a group while
+   * retaining its history for audit purposes, use {@link archive} instead.
    *
    * @example
    * ```typescript
@@ -1019,6 +1120,32 @@ export class FeatureFlagGroupModel {
       [id],
     );
     return (res as any).rowCount > 0;
+  }
+
+  /**
+   * Archives (hides) a feature flag group while keeping the row for
+   * historical/audit purposes. Archived groups are excluded from normal reads
+   * and no longer contribute subject-based targeting. Member flags are left
+   * untouched and remain active; the membership and subject rows are kept for
+   * audit but become inert.
+   *
+   * @param id - The group ID to archive
+   * @returns The archived group, or null if it does not exist or is already archived
+   *
+   * @remarks
+   * Archiving is irreversible: there is intentionally no `unarchive` method.
+   * The `archived` timestamp is set once and never changed (a second call is a
+   * no-op that returns null). The group's name remains reserved permanently.
+   *
+   * @example
+   * ```typescript
+   * const archived = await model.archive(1);
+   * ```
+   */
+  async archive(id: number): Promise<FeatureFlagGroup | null> {
+    const sql = `UPDATE ${GROUP_TABLE} SET archived = now() WHERE id = $1 AND archived IS NULL RETURNING ${GROUP_COLUMNS.join(", ")}`;
+    const res = await this.db.query(sql, [id]);
+    return res.rows.length > 0 ? mapGroupRow(res.rows[0]) : null;
   }
 
   /**
@@ -1089,12 +1216,16 @@ export class FeatureFlagGroupModel {
    * }
    * ```
    */
-  async getFeatureFlags(groupId: number): Promise<FeatureFlag[]> {
+  async getFeatureFlags(
+    groupId: number,
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlag[]> {
+    const filter = includeArchived ? "" : " AND f.archived IS NULL";
     const sql = `
       SELECT ${COLUMNS.map((c) => `f.${c}`).join(", ")}
       FROM ${TABLE} f
       INNER JOIN ${GROUP_MEMBER_TABLE} gm ON f.id = gm.feature_flag_id
-      WHERE gm.group_id = $1
+      WHERE gm.group_id = $1${filter}
       ORDER BY f.created DESC
     `;
     const res = await this.db.query(sql, [groupId]);
@@ -1114,12 +1245,14 @@ export class FeatureFlagGroupModel {
    */
   async getGroupsForFeatureFlag(
     featureFlagId: number,
+    { includeArchived = false }: { includeArchived?: boolean } = {},
   ): Promise<FeatureFlagGroup[]> {
+    const filter = includeArchived ? "" : " AND g.archived IS NULL";
     const sql = `
       SELECT ${GROUP_COLUMNS.map((c) => `g.${c}`).join(", ")}
       FROM ${GROUP_TABLE} g
       INNER JOIN ${GROUP_MEMBER_TABLE} gm ON g.id = gm.group_id
-      WHERE gm.feature_flag_id = $1
+      WHERE gm.feature_flag_id = $1${filter}
       ORDER BY g.created DESC
     `;
     const res = await this.db.query(sql, [featureFlagId]);
@@ -1167,12 +1300,16 @@ export class FeatureFlagGroupModel {
   /**
    * Gets all groups that are associated with a specific external subject identifier.
    */
-  async getGroupsForSubject(subject: string): Promise<FeatureFlagGroup[]> {
+  async getGroupsForSubject(
+    subject: string,
+    { includeArchived = false }: { includeArchived?: boolean } = {},
+  ): Promise<FeatureFlagGroup[]> {
+    const filter = includeArchived ? "" : " AND g.archived IS NULL";
     const sql = `
       SELECT ${GROUP_COLUMNS.map((c) => `g.${c}`).join(", ")}
       FROM ${GROUP_TABLE} g
       INNER JOIN ${GROUP_SUBJECT_TABLE} gs ON g.id = gs.feature_flag_group_id
-      WHERE gs.subject = $1
+      WHERE gs.subject = $1${filter}
       ORDER BY g.created DESC
     `;
     const res = await this.db.query(sql, [subject]);
@@ -1230,10 +1367,10 @@ export class FeatureFlagGroupModel {
 
     vals.push(groupId);
     const sql = `
-      UPDATE ${TABLE} 
+      UPDATE ${TABLE}
       SET ${updates.join(", ")}
-      WHERE id IN (
-        SELECT feature_flag_id 
+      WHERE archived IS NULL AND id IN (
+        SELECT feature_flag_id
         FROM ${GROUP_MEMBER_TABLE}
         WHERE group_id = $${paramIdx}
       )

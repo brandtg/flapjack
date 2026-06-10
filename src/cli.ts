@@ -68,6 +68,15 @@ const flagOptions = {
   },
 };
 
+// Option to include archived (hidden) records in read commands
+const includeArchivedOption = {
+  "include-archived": {
+    type: "boolean" as const,
+    default: false,
+    describe: "Include archived (hidden) records in the results",
+  },
+};
+
 // Create command
 cli.command(
   "create",
@@ -111,17 +120,21 @@ cli.command(
   "get <id>",
   "Get a feature flag by ID",
   (yargs) => {
-    return yargs.positional("id", {
-      type: "number",
-      describe: "Feature flag ID",
-    });
+    return yargs
+      .positional("id", {
+        type: "number",
+        describe: "Feature flag ID",
+      })
+      .options(includeArchivedOption);
   },
   async (argv) => {
     const db = createDatabase();
     const model = new FeatureFlagModel(db);
 
     try {
-      const flag = await model.getById(argv.id!);
+      const flag = await model.getById(argv.id!, {
+        includeArchived: argv.includeArchived,
+      });
       if (flag) {
         console.log(JSON.stringify(flag, null, 2));
       } else {
@@ -142,17 +155,21 @@ cli.command(
   "get-by-name <name>",
   "Get a feature flag by name",
   (yargs) => {
-    return yargs.positional("name", {
-      type: "string",
-      describe: "Feature flag name",
-    });
+    return yargs
+      .positional("name", {
+        type: "string",
+        describe: "Feature flag name",
+      })
+      .options(includeArchivedOption);
   },
   async (argv) => {
     const db = createDatabase();
     const model = new FeatureFlagModel(db);
 
     try {
-      const flag = await model.getByName(argv.name!);
+      const flag = await model.getByName(argv.name!, {
+        includeArchived: argv.includeArchived,
+      });
       if (flag) {
         console.log(JSON.stringify(flag, null, 2));
       } else {
@@ -172,13 +189,17 @@ cli.command(
 cli.command(
   "list",
   "List all feature flags",
-  () => {},
-  async () => {
+  (yargs) => {
+    return yargs.options(includeArchivedOption);
+  },
+  async (argv) => {
     const db = createDatabase();
     const model = new FeatureFlagModel(db);
 
     try {
-      const flags = await model.list();
+      const flags = await model.list({
+        includeArchived: argv.includeArchived,
+      });
       console.log(JSON.stringify(flags, null, 2));
     } catch (error) {
       console.error("Error listing feature flags:", error);
@@ -194,17 +215,21 @@ cli.command(
   "list-by-tag <tag>",
   "List feature flags carrying a given tag (e.g. release:1.5.0)",
   (yargs) => {
-    return yargs.positional("tag", {
-      type: "string",
-      describe: "Tag to filter by",
-    });
+    return yargs
+      .positional("tag", {
+        type: "string",
+        describe: "Tag to filter by",
+      })
+      .options(includeArchivedOption);
   },
   async (argv) => {
     const db = createDatabase();
     const model = new FeatureFlagModel(db);
 
     try {
-      const flags = await model.listByTag(argv.tag!);
+      const flags = await model.listByTag(argv.tag!, {
+        includeArchived: argv.includeArchived,
+      });
       console.log(JSON.stringify(flags, null, 2));
     } catch (error) {
       console.error("Error listing feature flags by tag:", error);
@@ -344,6 +369,39 @@ cli.command(
       }
     } catch (error) {
       console.error("Error deleting feature flag:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Archive command (soft delete; irreversible, hides the flag but keeps history)
+cli.command(
+  "archive <id>",
+  "Archive (hide) a feature flag while keeping its history. Irreversible.",
+  (yargs) => {
+    return yargs.positional("id", {
+      type: "number",
+      describe: "Feature flag ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagModel(db);
+
+    try {
+      const flag = await model.archive(argv.id!);
+      if (flag) {
+        console.log(JSON.stringify(flag, null, 2));
+      } else {
+        console.log(
+          `Feature flag with ID ${argv.id} not found or already archived`,
+        );
+        process.exit(1);
+      }
+    } catch (error) {
+      console.error("Error archiving feature flag:", error);
       process.exit(1);
     } finally {
       await db.end();
@@ -790,13 +848,17 @@ cli.command(
 cli.command(
   "group-list",
   "List all feature flag groups",
-  () => {},
-  async () => {
+  (yargs) => {
+    return yargs.options(includeArchivedOption);
+  },
+  async (argv) => {
     const db = createDatabase();
     const model = new FeatureFlagGroupModel(db);
 
     try {
-      const groups = await model.list();
+      const groups = await model.list({
+        includeArchived: argv.includeArchived,
+      });
       console.log(JSON.stringify(groups, null, 2));
     } catch (error) {
       console.error("Error listing feature flag groups:", error);
@@ -812,17 +874,21 @@ cli.command(
   "group-get <id>",
   "Get a feature flag group by ID",
   (yargs) => {
-    return yargs.positional("id", {
-      type: "number",
-      describe: "Feature flag group ID",
-    });
+    return yargs
+      .positional("id", {
+        type: "number",
+        describe: "Feature flag group ID",
+      })
+      .options(includeArchivedOption);
   },
   async (argv) => {
     const db = createDatabase();
     const model = new FeatureFlagGroupModel(db);
 
     try {
-      const group = await model.getById(argv.id!);
+      const group = await model.getById(argv.id!, {
+        includeArchived: argv.includeArchived,
+      });
       if (!group) {
         console.log(`Feature flag group with ID ${argv.id} not found`);
         process.exit(1);
@@ -842,17 +908,21 @@ cli.command(
   "group-get-by-name <name>",
   "Get a feature flag group by name",
   (yargs) => {
-    return yargs.positional("name", {
-      type: "string",
-      describe: "Feature flag group name",
-    });
+    return yargs
+      .positional("name", {
+        type: "string",
+        describe: "Feature flag group name",
+      })
+      .options(includeArchivedOption);
   },
   async (argv) => {
     const db = createDatabase();
     const model = new FeatureFlagGroupModel(db);
 
     try {
-      const group = await model.getByName(argv.name!);
+      const group = await model.getByName(argv.name!, {
+        includeArchived: argv.includeArchived,
+      });
       if (!group) {
         console.log(`Feature flag group with name "${argv.name}" not found`);
         process.exit(1);
@@ -940,6 +1010,38 @@ cli.command(
       console.log(`Feature flag group with ID ${argv.id} deleted successfully`);
     } catch (error) {
       console.error("Error deleting feature flag group:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
+// Archive a feature flag group (soft delete; irreversible, keeps history)
+cli.command(
+  "group-archive <id>",
+  "Archive (hide) a feature flag group while keeping its history. Irreversible.",
+  (yargs) => {
+    return yargs.positional("id", {
+      type: "number",
+      describe: "Feature flag group ID",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagGroupModel(db);
+
+    try {
+      const group = await model.archive(argv.id!);
+      if (!group) {
+        console.log(
+          `Feature flag group with ID ${argv.id} not found or already archived`,
+        );
+        process.exit(1);
+      }
+      console.log(JSON.stringify(group, null, 2));
+    } catch (error) {
+      console.error("Error archiving feature flag group:", error);
       process.exit(1);
     } finally {
       await db.end();
