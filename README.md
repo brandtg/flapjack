@@ -181,6 +181,36 @@ await featureFlags.isActiveForUser({
 });
 ```
 
+## Organizing Flags with Tags
+
+Tags are freeform labels for organizing flags without encoding that information in
+the flag name. They do **not** affect evaluation — they are purely organizational
+metadata. A common use is associating a release version with a flag, which can then
+be bumped via a database update without any code change.
+
+```typescript
+// Tag a flag with a release version (and any other labels)
+await featureFlags.create({
+  name: "checkout_v2",
+  tags: ["release:1.5.0", "checkout"],
+});
+
+// Find every flag shipping in a given release
+const flags = await featureFlags.listByTag("release:1.5.0");
+
+// Bump the release version later — no code change required
+await featureFlags.update(flag.id, { tags: ["release:1.6.0", "checkout"] });
+```
+
+The equivalent CLI commands:
+
+```bash
+flapjack create --name checkout_v2 --tags release:1.5.0 checkout
+flapjack list-by-tag release:1.5.0
+flapjack update <id> --tags release:1.6.0 checkout
+flapjack update <id> --clear-tags
+```
+
 ## Performance Considerations
 
 ⚠️ **Important**: Without caching, Flapjack queries the database on every `isActiveForUser()` call. For high-traffic applications, use the built-in caching layer:
@@ -354,6 +384,10 @@ Retrieves a feature flag by its name.
 
 Lists all feature flags, ordered by ID.
 
+#### `listByTag(tag: string): Promise<FeatureFlag[]>`
+
+Lists all feature flags carrying the given tag (exact match), ordered by ID.
+
 #### `update(id: number, changes: UpdateChanges): Promise<FeatureFlag | null>`
 
 Updates a feature flag. Returns the updated flag or null if not found.
@@ -383,6 +417,9 @@ flapjack create --name my_feature --roles admin --note "Admin-only feature"
 
 # List all flags
 flapjack list
+
+# List flags carrying a tag (e.g. a release version)
+flapjack list-by-tag release:1.5.0
 
 # Get a specific flag
 flapjack get-by-name my_feature

@@ -16,6 +16,8 @@ export type FeatureFlag = {
   groups?: string[];
   /** List of specific user IDs that have this feature flag enabled */
   users?: string[];
+  /** List of tags for organizing flags (e.g. a release version like "release:1.5.0") */
+  tags?: string[];
   /** Description of where this flag is used and what it does */
   note?: string;
   /** Date when the feature flag was created */

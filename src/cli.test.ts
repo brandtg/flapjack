@@ -196,6 +196,59 @@ describe("CLI smoke", () => {
     });
   });
 
+  it("supports tags and list-by-tag", async () => {
+    // create with tags
+    const createRes = await runCli(
+      [
+        "create",
+        "--name",
+        "cli-tags-flag",
+        "--tags",
+        "release:1.5.0",
+        "checkout",
+      ],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(createRes.code).toBe(0);
+    const created = JSON.parse(createRes.stdout.trim());
+    expect(created.tags).toEqual(["release:1.5.0", "checkout"]);
+
+    // list-by-tag finds it
+    const listRes = await runCli(["list-by-tag", "release:1.5.0"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(listRes.code).toBe(0);
+    const listed = JSON.parse(listRes.stdout.trim());
+    expect(listed.some((f: any) => f.id === created.id)).toBe(true);
+
+    // bump the release version, old tag no longer matches
+    const bumpRes = await runCli(
+      ["update", String(created.id), "--tags", "release:1.6.0", "checkout"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(bumpRes.code).toBe(0);
+
+    const oldTagRes = await runCli(["list-by-tag", "release:1.5.0"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    const oldTagListed = JSON.parse(oldTagRes.stdout.trim());
+    expect(oldTagListed.some((f: any) => f.id === created.id)).toBe(false);
+
+    // clear-tags removes them
+    const clearRes = await runCli(
+      ["update", String(created.id), "--clear-tags"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(clearRes.code).toBe(0);
+    const cleared = JSON.parse(clearRes.stdout.trim());
+    expect(cleared.tags).toBeUndefined();
+
+    // Clean up
+    await runCli(["delete", String(created.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+  });
+
   it("supports subject and group CLI workflows", async () => {
     const createRes = await runCli(
       [
