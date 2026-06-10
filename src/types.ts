@@ -26,6 +26,11 @@ export type FeatureFlag = {
   modified: Date;
   /** Optional expiration date for the feature flag */
   expires?: Date;
+  /**
+   * Date when the feature flag was archived (hidden). Set once and immutable;
+   * archiving is irreversible and the name remains reserved permanently.
+   */
+  archived?: Date;
 };
 
 /**
@@ -63,4 +68,9 @@ export type FeatureFlagGroup = {
   created: Date;
   /** Date when the group was last modified */
   modified: Date;
+  /**
+   * Date when the group was archived (hidden). Set once and immutable;
+   * archiving is irreversible and the name remains reserved permanently.
+   */
+  archived?: Date;
 };

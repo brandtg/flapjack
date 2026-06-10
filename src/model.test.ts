@@ -1834,6 +1834,113 @@ describe("FeatureFlagModel", () => {
       expect(results["subject-both-grouped"]).toBe(true);
     });
   });
+
+  describe("archive", () => {
+    it("should set the archived timestamp and hide the flag from reads", async () => {
+      const created = await model.create({
+        name: "archive-hide",
+        everyone: true,
+      });
+      expect(created.archived).toBeUndefined();
+
+      const archived = await model.archive(created.id);
+      expect(archived).not.toBeNull();
+      expect(archived!.archived).toBeInstanceOf(Date);
+
+      // Hidden from default reads
+      expect(await model.getById(created.id)).toBeNull();
+      expect(await model.getByName("archive-hide")).toBeNull();
+      const listed = await model.list();
+      expect(listed.find((f) => f.id === created.id)).toBeUndefined();
+    });
+
+    it("should still expose archived flags when includeArchived is true", async () => {
+      const created = await model.create({ name: "archive-include" });
+      await model.archive(created.id);
+
+      const byId = await model.getById(created.id, { includeArchived: true });
+      expect(byId).not.toBeNull();
+      expect(byId!.archived).toBeInstanceOf(Date);
+
+      const byName = await model.getByName("archive-include", {
+        includeArchived: true,
+      });
+      expect(byName!.id).toBe(created.id);
+
+      const listed = await model.list({ includeArchived: true });
+      expect(listed.find((f) => f.id === created.id)).toBeDefined();
+    });
+
+    it("should evaluate an archived flag as inactive", async () => {
+      const created = await model.create({
+        name: "archive-evaluate",
+        everyone: true,
+      });
+      expect(
+        await model.isActiveForUser({ name: "archive-evaluate", user: "u1" }),
+      ).toBe(true);
+
+      await model.archive(created.id);
+
+      expect(
+        await model.isActiveForUser({ name: "archive-evaluate", user: "u1" }),
+      ).toBe(false);
+
+      const many = await model.areActiveForUser({
+        names: ["archive-evaluate"],
+        user: "u1",
+      });
+      expect(many["archive-evaluate"]).toBe(false);
+    });
+
+    it("should reserve the name permanently after archiving", async () => {
+      const created = await model.create({ name: "archive-name-burned" });
+      await model.archive(created.id);
+
+      await expect(
+        model.create({ name: "archive-name-burned" }),
+      ).rejects.toThrow();
+    });
+
+    it("should be irreversible and immutable (no re-archive)", async () => {
+      const created = await model.create({ name: "archive-immutable" });
+      const archived = await model.archive(created.id);
+      const firstTimestamp = archived!.archived!.getTime();
+
+      // A second archive is a no-op and returns null
+      const second = await model.archive(created.id);
+      expect(second).toBeNull();
+
+      // The original archived timestamp is preserved
+      const reread = await model.getById(created.id, { includeArchived: true });
+      expect(reread!.archived!.getTime()).toBe(firstTimestamp);
+    });
+
+    it("should return null when archiving a non-existent flag", async () => {
+      expect(await model.archive(999999)).toBeNull();
+    });
+
+    it("should not match subjects for an archived flag", async () => {
+      const created = await model.create({ name: "archive-subject" });
+      await model.addSubject(created.id, "tenant:archive-subject");
+
+      expect(
+        await model.isActiveForContext({
+          name: "archive-subject",
+          subjects: ["tenant:archive-subject"],
+        }),
+      ).toBe(true);
+
+      await model.archive(created.id);
+
+      expect(
+        await model.isActiveForContext({
+          name: "archive-subject",
+          subjects: ["tenant:archive-subject"],
+        }),
+      ).toBe(false);
+    });
+  });
 });
 
 describe("FeatureFlagGroupModel", () => {
@@ -2545,6 +2652,124 @@ describe("FeatureFlagGroupModel", () => {
       expect(updated!.everyone).toBeUndefined();
       expect(updated!.percent).toBeUndefined();
       expect(updated!.roles).toBeUndefined();
+    });
+  });
+
+  describe("archive", () => {
+    it("should hide an archived group from reads but keep it for audit", async () => {
+      const group = await groupModel.create({ name: "group-archive-hide" });
+
+      const archived = await groupModel.archive(group.id);
+      expect(archived!.archived).toBeInstanceOf(Date);
+
+      expect(await groupModel.getById(group.id)).toBeNull();
+      expect(await groupModel.getByName("group-archive-hide")).toBeNull();
+
+      const fromList = await groupModel.list();
+      expect(fromList.find((g) => g.id === group.id)).toBeUndefined();
+
+      const includingArchived = await groupModel.getById(group.id, {
+        includeArchived: true,
+      });
+      expect(includingArchived).not.toBeNull();
+      expect(includingArchived!.archived).toBeInstanceOf(Date);
+    });
+
+    it("should reserve the group name permanently after archiving", async () => {
+      const group = await groupModel.create({ name: "group-name-burned" });
+      await groupModel.archive(group.id);
+
+      await expect(
+        groupModel.create({ name: "group-name-burned" }),
+      ).rejects.toThrow();
+    });
+
+    it("should be irreversible and immutable (no re-archive)", async () => {
+      const group = await groupModel.create({ name: "group-immutable" });
+      const archived = await groupModel.archive(group.id);
+      const firstTimestamp = archived!.archived!.getTime();
+
+      const second = await groupModel.archive(group.id);
+      expect(second).toBeNull();
+
+      const reread = await groupModel.getById(group.id, {
+        includeArchived: true,
+      });
+      expect(reread!.archived!.getTime()).toBe(firstTimestamp);
+    });
+
+    it("should leave member flags active but stop the group's subject targeting", async () => {
+      const group = await groupModel.create({ name: "group-archive-target" });
+      const flag = await flagModel.create({
+        name: "group-archive-target-flag",
+      });
+      await groupModel.addFeatureFlag(group.id, flag.id);
+      await groupModel.addSubject(group.id, "tenant:group-archive-target");
+
+      // Before archiving, the group's subject maps to the member flag
+      expect(
+        await flagModel.isActiveForContext({
+          name: "group-archive-target-flag",
+          subjects: ["tenant:group-archive-target"],
+        }),
+      ).toBe(true);
+
+      await groupModel.archive(group.id);
+
+      // Member flag is untouched and still readable
+      expect(await flagModel.getById(flag.id)).not.toBeNull();
+
+      // But the archived group no longer contributes subject targeting
+      expect(
+        await flagModel.isActiveForContext({
+          name: "group-archive-target-flag",
+          subjects: ["tenant:group-archive-target"],
+        }),
+      ).toBe(false);
+    });
+
+    it("should exclude archived member flags from getFeatureFlags", async () => {
+      const group = await groupModel.create({ name: "group-archive-members" });
+      const active = await flagModel.create({ name: "group-member-active" });
+      const toArchive = await flagModel.create({
+        name: "group-member-archived",
+      });
+      await groupModel.addFeatureFlag(group.id, active.id);
+      await groupModel.addFeatureFlag(group.id, toArchive.id);
+
+      await flagModel.archive(toArchive.id);
+
+      const flags = await groupModel.getFeatureFlags(group.id);
+      const names = flags.map((f) => f.name);
+      expect(names).toContain("group-member-active");
+      expect(names).not.toContain("group-member-archived");
+    });
+
+    it("should skip archived flags in updateAll", async () => {
+      const group = await groupModel.create({
+        name: "group-archive-updateall",
+      });
+      const active = await flagModel.create({
+        name: "updateall-active",
+        everyone: false,
+      });
+      const archivedFlag = await flagModel.create({
+        name: "updateall-archived",
+        everyone: false,
+      });
+      await groupModel.addFeatureFlag(group.id, active.id);
+      await groupModel.addFeatureFlag(group.id, archivedFlag.id);
+
+      await flagModel.archive(archivedFlag.id);
+
+      const count = await groupModel.updateAll(group.id, { everyone: true });
+      expect(count).toBe(1);
+
+      expect((await flagModel.getById(active.id))!.everyone).toBe(true);
+      const rereadArchived = await flagModel.getById(archivedFlag.id, {
+        includeArchived: true,
+      });
+      expect(rereadArchived!.everyone).toBe(false);
     });
   });
 });
