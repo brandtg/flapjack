@@ -54,6 +54,10 @@ const flagOptions = {
     type: "array" as const,
     describe: "List of specific user IDs that have this flag enabled",
   },
+  tags: {
+    type: "array" as const,
+    describe: "List of tags for organizing this flag (e.g. release:1.5.0)",
+  },
   note: {
     type: "string" as const,
     describe: "Description of where this flag is used and what it does",
@@ -87,6 +91,7 @@ cli.command(
       if (argv.roles !== undefined) input.roles = argv.roles as string[];
       if (argv.groups !== undefined) input.groups = argv.groups as string[];
       if (argv.users !== undefined) input.users = argv.users as string[];
+      if (argv.tags !== undefined) input.tags = argv.tags as string[];
       if (argv.note !== undefined) input.note = argv.note;
       if (argv.expires !== undefined) input.expires = new Date(argv.expires);
 
@@ -184,6 +189,32 @@ cli.command(
   },
 );
 
+// List flags carrying a given tag
+cli.command(
+  "list-by-tag <tag>",
+  "List feature flags carrying a given tag (e.g. release:1.5.0)",
+  (yargs) => {
+    return yargs.positional("tag", {
+      type: "string",
+      describe: "Tag to filter by",
+    });
+  },
+  async (argv) => {
+    const db = createDatabase();
+    const model = new FeatureFlagModel(db);
+
+    try {
+      const flags = await model.listByTag(argv.tag!);
+      console.log(JSON.stringify(flags, null, 2));
+    } catch (error) {
+      console.error("Error listing feature flags by tag:", error);
+      process.exit(1);
+    } finally {
+      await db.end();
+    }
+  },
+);
+
 // Update command
 cli.command(
   "update <id>",
@@ -215,6 +246,10 @@ cli.command(
         "clear-users": {
           type: "boolean" as const,
           describe: "Clear users list",
+        },
+        "clear-tags": {
+          type: "boolean" as const,
+          describe: "Clear tags list",
         },
         "clear-note": {
           type: "boolean" as const,
@@ -255,6 +290,10 @@ cli.command(
       // Users: clear flag takes precedence
       if ((argv as any).clearUsers) changes.users = null;
       else if (argv.users !== undefined) changes.users = argv.users as string[];
+
+      // Tags: clear flag takes precedence
+      if ((argv as any).clearTags) changes.tags = null;
+      else if (argv.tags !== undefined) changes.tags = argv.tags as string[];
 
       // Note: clear flag takes precedence
       if ((argv as any).clearNote) changes.note = null;

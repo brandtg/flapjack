@@ -23,6 +23,7 @@ const COLUMNS = [
   "roles",
   "groups",
   "users",
+  "tags",
   "note",
   "created",
   "modified",
@@ -49,6 +50,7 @@ function mapRow(row: any): FeatureFlag {
         : undefined,
     users:
       row.users && row.users.length > 0 ? (row.users as string[]) : undefined,
+    tags: row.tags && row.tags.length > 0 ? (row.tags as string[]) : undefined,
     note: row.note ?? undefined,
     created: new Date(row.created),
     modified: new Date(row.modified),
@@ -99,6 +101,7 @@ export class FeatureFlagModel {
    * @param input.roles - Optional list of roles that have this flag enabled
    * @param input.groups - Optional list of user groups that have this flag enabled
    * @param input.users - Optional list of specific user IDs that have this flag enabled
+   * @param input.tags - Optional list of tags for organizing the flag (e.g. a release version)
    * @param input.note - Optional description of the flag's purpose
    * @param input.expires - Optional expiration date for the feature flag
    * @returns The created feature flag with generated id, created, and modified timestamps
@@ -137,6 +140,10 @@ export class FeatureFlagModel {
     if ("users" in input) {
       cols.push("users");
       vals.push(input.users ?? null);
+    }
+    if ("tags" in input) {
+      cols.push("tags");
+      vals.push(input.tags ?? null);
     }
     if ("note" in input) {
       cols.push("note");
@@ -255,6 +262,24 @@ export class FeatureFlagModel {
   }
 
   /**
+   * Retrieves all feature flags that carry the given tag.
+   *
+   * @param tag - The tag to filter by (exact match against a tag in the flag's tags array)
+   * @returns Array of feature flags tagged with the given value
+   *
+   * @example
+   * ```typescript
+   * // Find every flag associated with a release version
+   * const flags = await model.listByTag("release:1.5.0");
+   * ```
+   */
+  async listByTag(tag: string): Promise<FeatureFlag[]> {
+    const sql = `SELECT ${COLUMNS.join(", ")} FROM ${TABLE} WHERE $1 = ANY(tags) ORDER BY id`;
+    const res = await this.db.query(sql, [tag]);
+    return res.rows.map(mapRow);
+  }
+
+  /**
    * Updates an existing feature flag.
    *
    * @param id - The unique identifier of the feature flag to update
@@ -308,6 +333,10 @@ export class FeatureFlagModel {
     if ("users" in changes) {
       sets.push(`users = $${sets.length + 1}`);
       vals.push(changes.users ?? null);
+    }
+    if ("tags" in changes) {
+      sets.push(`tags = $${sets.length + 1}`);
+      vals.push(changes.tags ?? null);
     }
     if ("note" in changes) {
       sets.push(`note = $${sets.length + 1}`);

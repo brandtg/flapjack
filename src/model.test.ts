@@ -71,6 +71,7 @@ describe("FeatureFlagModel", () => {
       expect(flag.everyone).toBeUndefined();
       expect(flag.percent).toBeUndefined();
       expect(flag.roles).toBeUndefined();
+      expect(flag.tags).toBeUndefined();
       expect(flag.note).toBeUndefined();
       expect(flag.created).toBeInstanceOf(Date);
       expect(flag.modified).toBeInstanceOf(Date);
@@ -85,6 +86,7 @@ describe("FeatureFlagModel", () => {
         roles: ["admin", "moderator"],
         groups: ["beta-users", "vip-customers"],
         users: ["user123", "user456"],
+        tags: ["release:1.5.0", "checkout"],
         note: "Test feature flag with all properties",
       };
       const flag = await model.create(input);
@@ -96,6 +98,7 @@ describe("FeatureFlagModel", () => {
       expect(flag.roles).toEqual(["admin", "moderator"]);
       expect(flag.groups).toEqual(["beta-users", "vip-customers"]);
       expect(flag.users).toEqual(["user123", "user456"]);
+      expect(flag.tags).toEqual(["release:1.5.0", "checkout"]);
       expect(flag.note).toBe("Test feature flag with all properties");
       expect(flag.created).toBeInstanceOf(Date);
       expect(flag.modified).toBeInstanceOf(Date);
@@ -332,6 +335,38 @@ describe("FeatureFlagModel", () => {
     });
   });
 
+  describe("listByTag", () => {
+    it("should return only flags carrying the given tag, ordered by id", async () => {
+      // Clear any existing flags from previous tests
+      const existingFlags = await model.list();
+      for (const flag of existingFlags) {
+        await model.delete(flag.id);
+      }
+
+      const flag1 = await model.create({
+        name: "tag-test-1",
+        tags: ["release:1.5.0", "checkout"],
+      });
+      await model.create({ name: "tag-test-2", tags: ["release:1.6.0"] });
+      const flag3 = await model.create({
+        name: "tag-test-3",
+        tags: ["release:1.5.0"],
+      });
+      await model.create({ name: "tag-test-4" });
+
+      const matches = await model.listByTag("release:1.5.0");
+
+      expect(matches).toHaveLength(2);
+      expect(matches[0].id).toBe(flag1.id);
+      expect(matches[1].id).toBe(flag3.id);
+    });
+
+    it("should return an empty array when no flags carry the tag", async () => {
+      const matches = await model.listByTag("release:does-not-exist");
+      expect(matches).toEqual([]);
+    });
+  });
+
   describe("update", () => {
     it("should update a feature flag", async () => {
       const created = await model.create({
@@ -448,6 +483,37 @@ describe("FeatureFlagModel", () => {
       expect(updated!.note).toBe("Updated without changing expires");
       expect(updated!.expires).toBeInstanceOf(Date);
       expect(updated!.expires?.toISOString()).toBe(expiresDate.toISOString());
+    });
+
+    it("should set and bump tags on a feature flag", async () => {
+      const created = await model.create({ name: "test-update-tags" });
+      expect(created.tags).toBeUndefined();
+
+      const tagged = await model.update(created.id, {
+        tags: ["release:1.5.0", "checkout"],
+      });
+      expect(tagged!.tags).toEqual(["release:1.5.0", "checkout"]);
+
+      // Bump the release version without touching code
+      const bumped = await model.update(created.id, {
+        tags: ["release:1.6.0", "checkout"],
+      });
+      expect(bumped!.tags).toEqual(["release:1.6.0", "checkout"]);
+    });
+
+    it("should clear tags from a feature flag", async () => {
+      const created = await model.create({
+        name: "test-clear-tags",
+        tags: ["release:1.5.0"],
+      });
+      expect(created.tags).toEqual(["release:1.5.0"]);
+
+      const updated = await model.update(created.id, {
+        tags: null as any,
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.tags).toBeUndefined();
     });
   });
 
