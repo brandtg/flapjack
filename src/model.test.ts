@@ -365,6 +365,36 @@ describe("FeatureFlagModel", () => {
       const matches = await model.listByTag("release:does-not-exist");
       expect(matches).toEqual([]);
     });
+
+    it("should exclude archived flags by default but include them on request", async () => {
+      const active = await model.create({
+        name: "tag-archive-active",
+        tags: ["release:archive-test"],
+      });
+      const archivedFlag = await model.create({
+        name: "tag-archive-hidden",
+        tags: ["release:archive-test"],
+      });
+      await model.archive(archivedFlag.id);
+
+      const defaultMatches = await model.listByTag("release:archive-test");
+      const defaultIds = defaultMatches.map((f) => f.id);
+      expect(defaultIds).toContain(active.id);
+      expect(defaultIds).not.toContain(archivedFlag.id);
+
+      const allMatches = await model.listByTag("release:archive-test", {
+        includeArchived: true,
+      });
+      const allIds = allMatches.map((f) => f.id);
+      expect(allIds).toContain(active.id);
+      expect(allIds).toContain(archivedFlag.id);
+
+      // Hard-delete both (delete works regardless of archived state) so the
+      // archived row does not leak into later tests that clean up via list(),
+      // which excludes archived flags.
+      await model.delete(active.id);
+      await model.delete(archivedFlag.id);
+    });
   });
 
   describe("update", () => {

@@ -249,6 +249,168 @@ describe("CLI smoke", () => {
     });
   });
 
+  it("archives a flag and respects --include-archived", async () => {
+    // create a flag
+    const createRes = await runCli(
+      ["create", "--name", "cli-archive-flag", "--everyone", "true"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(createRes.code).toBe(0);
+    const created = JSON.parse(createRes.stdout.trim());
+    expect(created.archived).toBeUndefined();
+
+    // archive it: returns the flag with an archived timestamp
+    const archiveRes = await runCli(["archive", String(created.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(archiveRes.code).toBe(0);
+    const archived = JSON.parse(archiveRes.stdout.trim());
+    expect(archived.id).toBe(created.id);
+    expect(archived.archived).toBeDefined();
+    expect(new Date(archived.archived).toString()).not.toBe("Invalid Date");
+
+    // default get hides it (exit 1, "not found")
+    const getHiddenRes = await runCli(["get", String(created.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(getHiddenRes.code).toBe(1);
+    expect(getHiddenRes.stdout).toContain("not found");
+
+    // get --include-archived still surfaces it
+    const getIncludedRes = await runCli(
+      ["get", String(created.id), "--include-archived"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(getIncludedRes.code).toBe(0);
+    const included = JSON.parse(getIncludedRes.stdout.trim());
+    expect(included.id).toBe(created.id);
+    expect(included.archived).toBeDefined();
+
+    // get-by-name --include-archived also surfaces it
+    const getByNameRes = await runCli(
+      ["get-by-name", "cli-archive-flag", "--include-archived"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(getByNameRes.code).toBe(0);
+    expect(JSON.parse(getByNameRes.stdout.trim()).id).toBe(created.id);
+
+    // list hides it by default but includes it with --include-archived
+    const listDefaultRes = await runCli(["list"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(listDefaultRes.code).toBe(0);
+    expect(
+      JSON.parse(listDefaultRes.stdout.trim()).some(
+        (f: any) => f.id === created.id,
+      ),
+    ).toBe(false);
+
+    const listIncludedRes = await runCli(["list", "--include-archived"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(listIncludedRes.code).toBe(0);
+    expect(
+      JSON.parse(listIncludedRes.stdout.trim()).some(
+        (f: any) => f.id === created.id,
+      ),
+    ).toBe(true);
+
+    // an archived flag evaluates to inactive
+    const isActiveRes = await runCli(
+      ["is-active", "cli-archive-flag", "--user", "anyone"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(isActiveRes.code).toBe(0);
+    expect(JSON.parse(isActiveRes.stdout.trim()).isActive).toBe(false);
+
+    // archiving is irreversible: a second archive is a no-op (exit 1)
+    const reArchiveRes = await runCli(["archive", String(created.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(reArchiveRes.code).toBe(1);
+    expect(reArchiveRes.stdout).toContain("already archived");
+
+    // archiving a non-existent flag also exits 1
+    const archiveMissingRes = await runCli(["archive", "999999"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(archiveMissingRes.code).toBe(1);
+  });
+
+  it("archives a group and respects --include-archived", async () => {
+    const createRes = await runCli(
+      ["group-create", "--name", "cli-archive-group"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(createRes.code).toBe(0);
+    const group = JSON.parse(createRes.stdout.trim());
+    expect(group.archived).toBeUndefined();
+
+    const archiveRes = await runCli(["group-archive", String(group.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(archiveRes.code).toBe(0);
+    const archived = JSON.parse(archiveRes.stdout.trim());
+    expect(archived.id).toBe(group.id);
+    expect(archived.archived).toBeDefined();
+
+    // default group-get hides it
+    const getHiddenRes = await runCli(["group-get", String(group.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(getHiddenRes.code).toBe(1);
+    expect(getHiddenRes.stdout).toContain("not found");
+
+    // group-get --include-archived surfaces it
+    const getIncludedRes = await runCli(
+      ["group-get", String(group.id), "--include-archived"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(getIncludedRes.code).toBe(0);
+    expect(JSON.parse(getIncludedRes.stdout.trim()).id).toBe(group.id);
+
+    // group-get-by-name --include-archived surfaces it
+    const getByNameRes = await runCli(
+      ["group-get-by-name", "cli-archive-group", "--include-archived"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(getByNameRes.code).toBe(0);
+    expect(JSON.parse(getByNameRes.stdout.trim()).id).toBe(group.id);
+
+    // group-list hides it by default, includes it with the flag
+    const listDefaultRes = await runCli(["group-list"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(listDefaultRes.code).toBe(0);
+    expect(
+      JSON.parse(listDefaultRes.stdout.trim()).some(
+        (g: any) => g.id === group.id,
+      ),
+    ).toBe(false);
+
+    const listIncludedRes = await runCli(["group-list", "--include-archived"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(listIncludedRes.code).toBe(0);
+    expect(
+      JSON.parse(listIncludedRes.stdout.trim()).some(
+        (g: any) => g.id === group.id,
+      ),
+    ).toBe(true);
+
+    // re-archiving is a no-op, missing group also exits 1
+    const reArchiveRes = await runCli(["group-archive", String(group.id)], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(reArchiveRes.code).toBe(1);
+    expect(reArchiveRes.stdout).toContain("already archived");
+
+    const archiveMissingRes = await runCli(["group-archive", "999999"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(archiveMissingRes.code).toBe(1);
+  });
+
   it("supports subject and group CLI workflows", async () => {
     const createRes = await runCli(
       [
