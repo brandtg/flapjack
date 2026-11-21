@@ -125,10 +125,9 @@ describe("CLI smoke", () => {
   });
 
   it("rejects an invalid --expires before requiring a database connection", async () => {
-    const res = await runCli(
-      ["update", "1", "--expires", "not-a-date"],
-      { DATABASE_URL: "" },
-    );
+    const res = await runCli(["update", "1", "--expires", "not-a-date"], {
+      DATABASE_URL: "",
+    });
     expect(res.code).toBe(1);
     expect(res.stderr).toContain("--expires");
     expect(res.stderr).not.toContain("DATABASE_URL is not set");
@@ -586,7 +585,13 @@ describe("CLI smoke", () => {
     expect(JSON.parse(isActiveRes.stdout.trim()).isActive).toBe(true);
 
     const areActiveUserRes = await runCli(
-      ["are-active", "--names", "cli-subject-flag", "--subjects", "tenant:acme"],
+      [
+        "are-active",
+        "--names",
+        "cli-subject-flag",
+        "--subjects",
+        "tenant:acme",
+      ],
       { DATABASE_URL: TEST_DB_URL },
     );
     expect(areActiveUserRes.code).toBe(0);

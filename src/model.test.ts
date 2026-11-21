@@ -1,6 +1,11 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { Pool } from "pg";
-import { FeatureFlagModel, FeatureFlagGroupModel, hashUserId, InvalidFlagInputError } from "./model.js";
+import {
+  FeatureFlagModel,
+  FeatureFlagGroupModel,
+  hashUserId,
+  InvalidFlagInputError,
+} from "./model.js";
 import { runMigrations } from "./migrate.js";
 
 // Tests connect to the dev DB on FLAPJACK_TEST_PORT (default 5477, the port
@@ -142,14 +147,24 @@ describe("FeatureFlagModel", () => {
     });
 
     it("should reject an empty name", async () => {
-      await expect(model.create({ name: "" })).rejects.toThrow(InvalidFlagInputError);
-      await expect(model.create({ name: "   " })).rejects.toThrow(InvalidFlagInputError);
+      await expect(model.create({ name: "" })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
+      await expect(model.create({ name: "   " })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
     });
 
     it("should reject an out-of-range percent", async () => {
-      await expect(model.create({ name: "bad-percent", percent: 100 })).rejects.toThrow(InvalidFlagInputError);
-      await expect(model.create({ name: "bad-percent", percent: -1 })).rejects.toThrow(InvalidFlagInputError);
-      await expect(model.create({ name: "bad-percent", percent: 100 })).rejects.toThrow(/percent/);
+      await expect(
+        model.create({ name: "bad-percent", percent: 100 }),
+      ).rejects.toThrow(InvalidFlagInputError);
+      await expect(
+        model.create({ name: "bad-percent", percent: -1 }),
+      ).rejects.toThrow(InvalidFlagInputError);
+      await expect(
+        model.create({ name: "bad-percent", percent: 100 }),
+      ).rejects.toThrow(/percent/);
     });
 
     it("should reject an invalid expires date", async () => {
@@ -563,14 +578,22 @@ describe("FeatureFlagModel", () => {
 
     it("should reject an empty name", async () => {
       const created = await model.create({ name: "test-update-empty-name" });
-      await expect(model.update(created.id, { name: "" })).rejects.toThrow(InvalidFlagInputError);
-      await expect(model.update(created.id, { name: "   " })).rejects.toThrow(InvalidFlagInputError);
+      await expect(model.update(created.id, { name: "" })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
+      await expect(model.update(created.id, { name: "   " })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
     });
 
     it("should reject an out-of-range percent", async () => {
       const created = await model.create({ name: "test-update-bad-percent" });
-      await expect(model.update(created.id, { percent: 100 })).rejects.toThrow(InvalidFlagInputError);
-      await expect(model.update(created.id, { percent: -1 })).rejects.toThrow(InvalidFlagInputError);
+      await expect(model.update(created.id, { percent: 100 })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
+      await expect(model.update(created.id, { percent: -1 })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
     });
 
     it("should reject an invalid expires date", async () => {
@@ -649,7 +672,9 @@ describe("FeatureFlagModel", () => {
     });
 
     it("should not reject an explicit undefined name", async () => {
-      const created = await model.create({ name: "test-update-undefined-name" });
+      const created = await model.create({
+        name: "test-update-undefined-name",
+      });
 
       const updated = await model.update(created.id, {
         name: undefined as any,

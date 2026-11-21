@@ -200,7 +200,9 @@ const flagModel = new FeatureFlagModel(pool, {
     // e.g. emit a usage metric / alert that an expired flag is still in use
     await metrics.record("flag.expired_used", { flag: flag.name });
     // return true to keep the flag active for a short grace period after expiry
-    return flag.expires && flag.expires > new Date(Date.now() - 24 * 60 * 60 * 1000);
+    return (
+      flag.expires && flag.expires > new Date(Date.now() - 24 * 60 * 60 * 1000)
+    );
   },
 });
 
@@ -211,7 +213,9 @@ await flagModel.create({
 });
 
 // Update an existing flag to expire in 24 hours
-await flagModel.update(flagId, { expires: new Date(Date.now() + 24 * 60 * 60 * 1000) });
+await flagModel.update(flagId, {
+  expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+});
 ```
 
 The CLI also supports `--expires` (ISO 8601) on `create` and `update`, and `--clear-expires` on `update` to remove the expiration date:
@@ -470,7 +474,9 @@ import { FeatureFlagModel } from "@brandtg/flapjack";
 import type { FeatureFlagEventHandlers } from "@brandtg/flapjack";
 
 const model = new FeatureFlagModel(pool, {
-  onExpired: async ({ flag }) => { /* return true/false/undefined */ },
+  onExpired: async ({ flag }) => {
+    /* return true/false/undefined */
+  },
 });
 ```
 
@@ -679,7 +685,9 @@ Flags can carry an `expires` date. Expiry is **signal, not a hard stop**: an exp
 const flagModel = new FeatureFlagModel(pool, {
   onExpired: async ({ flag }) => {
     // fire metrics/alert; return true for a short grace period after expiry
-    return flag.expires && flag.expires > new Date(Date.now() - 24 * 60 * 60 * 1000);
+    return (
+      flag.expires && flag.expires > new Date(Date.now() - 24 * 60 * 60 * 1000)
+    );
   },
 });
 ```

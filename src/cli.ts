@@ -3,7 +3,12 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import { Pool } from "pg";
-import { FeatureFlagModel, FeatureFlagGroupModel, hashUserId, InvalidFlagInputError } from "./model.js";
+import {
+  FeatureFlagModel,
+  FeatureFlagGroupModel,
+  hashUserId,
+  InvalidFlagInputError,
+} from "./model.js";
 import dotenv from "dotenv";
 
 dotenv.config({ quiet: true });
@@ -32,7 +37,12 @@ class CliNotFoundError extends Error {
 
 function parsePercentOption(value: number | undefined): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 99.9) {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 99.9
+  ) {
     throw new InvalidFlagInputError(
       `--percent must be a number between 0 and 99.9 (got ${JSON.stringify(value)}); use --everyone true for a 100% rollout`,
     );
@@ -219,7 +229,9 @@ cli.command(
       if (flag) {
         console.log(JSON.stringify(flag, null, 2));
       } else {
-        throw new CliNotFoundError(`Feature flag with name "${argv.name}" not found`);
+        throw new CliNotFoundError(
+          `Feature flag with name "${argv.name}" not found`,
+        );
       }
     } finally {
       await db.end();
@@ -427,7 +439,9 @@ cli.command(
       if (flag) {
         console.log(JSON.stringify(flag, null, 2));
       } else {
-        throw new CliNotFoundError(`Feature flag with ID ${argv.id} not found or already archived`);
+        throw new CliNotFoundError(
+          `Feature flag with ID ${argv.id} not found or already archived`,
+        );
       }
     } finally {
       await db.end();
@@ -898,7 +912,9 @@ cli.command(
         includeArchived: argv.includeArchived,
       });
       if (!group) {
-        throw new CliNotFoundError(`Feature flag group with ID ${argv.id} not found`);
+        throw new CliNotFoundError(
+          `Feature flag group with ID ${argv.id} not found`,
+        );
       }
       console.log(JSON.stringify(group, null, 2));
     } finally {
@@ -928,7 +944,9 @@ cli.command(
         includeArchived: argv.includeArchived,
       });
       if (!group) {
-        throw new CliNotFoundError(`Feature flag group with name "${argv.name}" not found`);
+        throw new CliNotFoundError(
+          `Feature flag group with name "${argv.name}" not found`,
+        );
       }
       console.log(JSON.stringify(group, null, 2));
     } finally {
@@ -974,7 +992,9 @@ cli.command(
 
       const group = await model.update(argv.id!, changes);
       if (!group) {
-        throw new CliNotFoundError(`Feature flag group with ID ${argv.id} not found`);
+        throw new CliNotFoundError(
+          `Feature flag group with ID ${argv.id} not found`,
+        );
       }
       console.log(JSON.stringify(group, null, 2));
     } finally {
@@ -1000,7 +1020,9 @@ cli.command(
     try {
       const deleted = await model.delete(argv.id!);
       if (!deleted) {
-        throw new CliNotFoundError(`Feature flag group with ID ${argv.id} not found`);
+        throw new CliNotFoundError(
+          `Feature flag group with ID ${argv.id} not found`,
+        );
       }
       console.log(`Feature flag group with ID ${argv.id} deleted successfully`);
     } finally {
@@ -1026,7 +1048,9 @@ cli.command(
     try {
       const group = await model.archive(argv.id!);
       if (!group) {
-        throw new CliNotFoundError(`Feature flag group with ID ${argv.id} not found or already archived`);
+        throw new CliNotFoundError(
+          `Feature flag group with ID ${argv.id} not found or already archived`,
+        );
       }
       console.log(JSON.stringify(group, null, 2));
     } finally {
@@ -1456,7 +1480,9 @@ main()
     if (err instanceof CliNotFoundError) {
       console.log(err.message);
     } else {
-      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
     process.exit(1);
   });

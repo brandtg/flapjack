@@ -117,8 +117,10 @@ function validateFlagInput(
     // the assignment (same as omitting the key).
     validateName(changes.name);
   }
-  if ("percent" in changes && changes.percent !== undefined) validatePercent(changes.percent);
-  if ("expires" in changes && changes.expires !== undefined) validateExpires(changes.expires);
+  if ("percent" in changes && changes.percent !== undefined)
+    validatePercent(changes.percent);
+  if ("expires" in changes && changes.expires !== undefined)
+    validateExpires(changes.expires);
 }
 
 function mapRow(row: any): FeatureFlag {
@@ -235,7 +237,16 @@ export class FeatureFlagModel {
     // `in` is used to distinguish a present-but-`undefined` key from an
     // absent one — an absent key is skipped entirely; a present `null` is
     // written as SQL NULL.
-    for (const key of ["everyone", "percent", "roles", "groups", "users", "tags", "note", "expires"] as const) {
+    for (const key of [
+      "everyone",
+      "percent",
+      "roles",
+      "groups",
+      "users",
+      "tags",
+      "note",
+      "expires",
+    ] as const) {
       if (!(key in input)) continue;
       const value = input[key];
       if (value === undefined) continue;
@@ -435,7 +446,16 @@ export class FeatureFlagModel {
         vals.push(changes.name ?? null);
       }
     }
-    for (const key of ["everyone", "percent", "roles", "groups", "users", "tags", "note", "expires"] as const) {
+    for (const key of [
+      "everyone",
+      "percent",
+      "roles",
+      "groups",
+      "users",
+      "tags",
+      "note",
+      "expires",
+    ] as const) {
       if (!(key in changes)) continue;
       const value = changes[key];
       if (value === undefined) continue;

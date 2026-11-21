@@ -184,10 +184,18 @@ describe("FeatureFlagCache", () => {
   });
 
   it("should reject a non-positive or non-finite ttl", () => {
-    expect(() => new FeatureFlagCache({ model: mockModel, cache, ttl: 0 })).toThrow(/ttl/);
-    expect(() => new FeatureFlagCache({ model: mockModel, cache, ttl: -1 })).toThrow(/ttl/);
-    expect(() => new FeatureFlagCache({ model: mockModel, cache, ttl: NaN })).toThrow(/ttl/);
-    expect(() => new FeatureFlagCache({ model: mockModel, cache, ttl: Infinity })).toThrow(/ttl/);
+    expect(
+      () => new FeatureFlagCache({ model: mockModel, cache, ttl: 0 }),
+    ).toThrow(/ttl/);
+    expect(
+      () => new FeatureFlagCache({ model: mockModel, cache, ttl: -1 }),
+    ).toThrow(/ttl/);
+    expect(
+      () => new FeatureFlagCache({ model: mockModel, cache, ttl: NaN }),
+    ).toThrow(/ttl/);
+    expect(
+      () => new FeatureFlagCache({ model: mockModel, cache, ttl: Infinity }),
+    ).toThrow(/ttl/);
   });
 
   it("should call model on cache miss", async () => {
@@ -428,14 +436,20 @@ describe("FeatureFlagCache", () => {
     vi.mocked(mockModel.getByName).mockResolvedValue(flagSnapshot);
 
     // First call (miss) — the miss path stores the expiry from the snapshot
-    const result1 = await flagCache.isActiveForUser({ name: "test_flag", user: "user123" });
+    const result1 = await flagCache.isActiveForUser({
+      name: "test_flag",
+      user: "user123",
+    });
     expect(result1).toBe(false);
     // The model itself fired the handler on the miss — we must not double-fire here
     expect(mockModel.fireExpiredHandler).not.toHaveBeenCalled();
 
     // Second call (hit) — stored expiry is in the past, so we re-read the flag
     // fresh and fire the handler via the shared model helper
-    const result2 = await flagCache.isActiveForUser({ name: "test_flag", user: "user123" });
+    const result2 = await flagCache.isActiveForUser({
+      name: "test_flag",
+      user: "user123",
+    });
     expect(result2).toBe(false);
     expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(1);
     expect(mockModel.getByName).toHaveBeenCalledTimes(2);
@@ -484,7 +498,10 @@ describe("FeatureFlagCache", () => {
     vi.mocked(mockModel.fireExpiredHandler).mockResolvedValue(true as any);
 
     await flagCache.isActiveForUser({ name: "test_flag", user: "user123" });
-    const result2 = await flagCache.isActiveForUser({ name: "test_flag", user: "user123" });
+    const result2 = await flagCache.isActiveForUser({
+      name: "test_flag",
+      user: "user123",
+    });
 
     expect(result2).toBe(false);
   });
@@ -507,7 +524,10 @@ describe("FeatureFlagCache", () => {
     // Two calls — both hit the cache after the first miss; the second must not
     // read the flag or fire the handler (stored expiry is in the future)
     await flagCache.isActiveForUser({ name: "test_flag", user: "user123" });
-    const result2 = await flagCache.isActiveForUser({ name: "test_flag", user: "user123" });
+    const result2 = await flagCache.isActiveForUser({
+      name: "test_flag",
+      user: "user123",
+    });
 
     expect(result2).toBe(true);
     expect(mockModel.getByName).toHaveBeenCalledTimes(1); // miss path only
@@ -553,7 +573,10 @@ describe("FeatureFlagCache", () => {
       .mockResolvedValue(freshSnapshot);
 
     await flagCache.isActiveForUser({ name: "test_flag", user: "user123" });
-    const result2 = await flagCache.isActiveForUser({ name: "test_flag", user: "user123" });
+    const result2 = await flagCache.isActiveForUser({
+      name: "test_flag",
+      user: "user123",
+    });
 
     expect(result2).toBe(false); // cached result stands
     // The stored expiry was in the past, so the hit re-read the flag fresh
