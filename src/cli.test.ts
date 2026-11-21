@@ -43,7 +43,9 @@ describe("CLI smoke", () => {
   beforeAll(async () => {
     const setupPool = new Pool({ ...DB_CONFIG, database: "postgres" });
     try {
-      await setupPool.query(`DROP DATABASE IF EXISTS ${TEST_DB_NAME}`);
+      await setupPool.query(
+        `DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`,
+      );
       await setupPool.query(`CREATE DATABASE ${TEST_DB_NAME}`);
     } finally {
       await setupPool.end();
@@ -60,7 +62,9 @@ describe("CLI smoke", () => {
     await adminPool.end();
     const cleanupPool = new Pool({ ...DB_CONFIG, database: "postgres" });
     try {
-      await cleanupPool.query(`DROP DATABASE IF EXISTS ${TEST_DB_NAME}`);
+      await cleanupPool.query(
+        `DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`,
+      );
     } finally {
       await cleanupPool.end();
     }

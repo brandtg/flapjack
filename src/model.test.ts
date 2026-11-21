@@ -25,7 +25,9 @@ describe("FeatureFlagModel", () => {
 
     try {
       // Drop test database if it exists and create a fresh one
-      await setupPool.query(`DROP DATABASE IF EXISTS ${TEST_DB_NAME}`);
+      await setupPool.query(
+        `DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`,
+      );
       await setupPool.query(`CREATE DATABASE ${TEST_DB_NAME}`);
     } finally {
       await setupPool.end();
@@ -55,7 +57,9 @@ describe("FeatureFlagModel", () => {
     });
 
     try {
-      await cleanupPool.query(`DROP DATABASE IF EXISTS ${TEST_DB_NAME}`);
+      await cleanupPool.query(
+        `DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`,
+      );
     } finally {
       await cleanupPool.end();
     }
@@ -665,8 +669,16 @@ describe("FeatureFlagModel", () => {
     it("should pass every user for percent 99.9", async () => {
       await model.create({ name: "percent-999-flag", percent: 99.9 });
       for (const user of [
-        "user-a", "user-b", "user-c", "user-d", "user-e", "user-f",
-        "user-g", "user-h", "user-i", "user-j",
+        "user-a",
+        "user-b",
+        "user-c",
+        "user-d",
+        "user-e",
+        "user-f",
+        "user-g",
+        "user-h",
+        "user-i",
+        "user-j",
       ]) {
         const active = await model.isActiveForUser({
           name: "percent-999-flag",
@@ -2097,7 +2109,9 @@ describe("FeatureFlagGroupModel", () => {
     });
 
     try {
-      await setupPool.query(`DROP DATABASE IF EXISTS flapjack_group_test`);
+      await setupPool.query(
+        `DROP DATABASE IF EXISTS flapjack_group_test WITH (FORCE)`,
+      );
       await setupPool.query(`CREATE DATABASE flapjack_group_test`);
     } finally {
       await setupPool.end();
@@ -2125,7 +2139,9 @@ describe("FeatureFlagGroupModel", () => {
     });
 
     try {
-      await cleanupPool.query(`DROP DATABASE IF EXISTS flapjack_group_test`);
+      await cleanupPool.query(
+        `DROP DATABASE IF EXISTS flapjack_group_test WITH (FORCE)`,
+      );
     } finally {
       await cleanupPool.end();
     }
