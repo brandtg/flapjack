@@ -87,7 +87,7 @@ The CI uses a PostgreSQL service container with these credentials:
 - Password: `flapjack`
 - Database: `flapjack`
 - Host: `localhost`
-- Port: `5432`
+- Port: `5477`
 
 If tests fail, check that `DATABASE_URL` environment variable is set correctly in the workflow.
 

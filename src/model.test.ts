@@ -7,7 +7,7 @@ const DB_CONFIG = {
   user: "flapjack",
   password: "flapjack",
   host: "localhost",
-  port: 5432,
+  port: 5477,
 };
 
 const TEST_DB_NAME = "flapjack_test";
