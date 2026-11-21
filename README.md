@@ -217,7 +217,7 @@ flapjack update <id> --clear-tags
 
 ### Built-in Caching Layer
 
-Flapjack includes a high-performance caching layer with TTL support:
+Flapjack includes a high-performance caching layer with TTL support. The built-in `InMemoryCache` is additionally bounded: at most `maxSize` entries (default `10_000`, via `new InMemoryCache({ maxSize })`) are held before the least-recently-used entries are evicted (with expired entries dropped first). A long-running process can therefore hold at most that many entries, and you can raise or lower the bound to match your workload.
 
 ```typescript
 import { Pool } from "pg";
@@ -234,7 +234,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // Create cached feature flags instance
 const featureFlags = new FeatureFlagCache({
   model: new FeatureFlagModel(pool),
-  cache: new InMemoryCache<CachedFlagResult>(), // result + expiry only
+  cache: new InMemoryCache<CachedFlagResult>({ maxSize: 10_000 }), // result + expiry; 10k-entry LRU bound
   ttl: 300, // Set TTL to 5 minutes (300 seconds)
 });
 

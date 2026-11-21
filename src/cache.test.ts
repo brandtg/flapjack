@@ -63,6 +63,82 @@ describe("InMemoryCache", () => {
     expect(await cache.get("key2")).toBe("value2");
   });
 
+  it("should evict the least-recently-used entry when the size bound is exceeded", async () => {
+    const bounded = new InMemoryCache<string>({ maxSize: 2 });
+
+    await bounded.set("a", "a");
+    await bounded.set("b", "b");
+    await bounded.set("c", "c");
+
+    expect(bounded.size()).toBe(2);
+    expect(await bounded.get("a")).toBeUndefined(); // least recently used
+    expect(await bounded.get("b")).toBe("b");
+    expect(await bounded.get("c")).toBe("c");
+  });
+
+  it("should treat a get as a recency refresh when evicting", async () => {
+    const bounded = new InMemoryCache<string>({ maxSize: 2 });
+
+    await bounded.set("a", "a");
+    await bounded.set("b", "b");
+    await bounded.get("a"); // refresh a — b is now least recently used
+    await bounded.set("c", "c");
+
+    expect(await bounded.get("a")).toBe("a");
+    expect(await bounded.get("b")).toBeUndefined(); // evicted
+    expect(await bounded.get("c")).toBe("c");
+  });
+
+  it("should treat a set of an existing key as a recency refresh", async () => {
+    const bounded = new InMemoryCache<string>({ maxSize: 2 });
+
+    await bounded.set("a", "a");
+    await bounded.set("b", "b");
+    await bounded.set("a", "a2"); // refresh a — b is now least recently used
+    await bounded.set("c", "c");
+
+    expect(await bounded.get("a")).toBe("a2");
+    expect(await bounded.get("b")).toBeUndefined(); // evicted
+  });
+
+  it("should drop expired entries before evicting live ones", async () => {
+    const bounded = new InMemoryCache<string>({ maxSize: 2 });
+
+    // The expired entry is the NEWEST — naive LRU would evict the oldest
+    // (the live entry) instead of it
+    await bounded.set("live", "fresh", 5);
+    await bounded.set("expired", "old", 0.05); // short TTL
+
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    await bounded.set("newer", "newer");
+
+    expect(await bounded.get("live")).toBe("fresh"); // survived
+    expect(await bounded.get("expired")).toBeUndefined(); // dropped
+    expect(await bounded.get("newer")).toBe("newer");
+    expect(bounded.size()).toBe(2);
+  });
+
+  it("should default to 10,000 entries", async () => {
+    // 10_000 is the default bound — 10_000 distinct keys must not be evicted,
+    // and one more must push out exactly one entry
+    const cache = new InMemoryCache<string>();
+    for (let i = 0; i < 10_000; i++) {
+      await cache.set(`key-${i}`, `v-${i}`);
+    }
+    expect(cache.size()).toBe(10_000);
+
+    await cache.set("overflow", "v-overflow");
+    expect(cache.size()).toBe(10_000);
+    expect(await cache.get("key-0")).toBeUndefined(); // oldest evicted
+    expect(await cache.get("overflow")).toBe("v-overflow");
+  });
+
+  it("should reject a non-positive maxSize", () => {
+    expect(() => new InMemoryCache({ maxSize: 0 })).toThrow(/maxSize/);
+    expect(() => new InMemoryCache({ maxSize: -5 })).toThrow(/maxSize/);
+    expect(() => new InMemoryCache({ maxSize: 1.5 })).toThrow(/maxSize/);
+  });
+
   it("should clear all entries", async () => {
     await cache.set("key1", "value1");
     await cache.set("key2", "value2");
