@@ -104,7 +104,7 @@ export class FeatureFlagModel {
    * @param input - Feature flag configuration
    * @param input.name - Unique name for the feature flag (required)
    * @param input.everyone - Optional boolean to enable/disable for everyone (overrides all other settings)
-   * @param input.percent - Optional percentage rollout (0-99.9)
+   * @param input.percent - Optional percentage rollout (0-99.9; for 100% use `everyone: true`)
    * @param input.roles - Optional list of roles that have this flag enabled
    * @param input.groups - Optional list of user groups that have this flag enabled
    * @param input.users - Optional list of specific user IDs that have this flag enabled
@@ -597,6 +597,8 @@ export class FeatureFlagModel {
     }
 
     // Percentage Check: If percentage rollout applies to this user, return rollout result
+    // Users are bucketed into integer buckets 0-99 (`hash % 100`). A percent of
+    // 99.9 passes every bucket; for an explicit 100% rollout use `everyone: true`.
     if (user && flag.percent && flag.percent > 0) {
       const userHash = await this.hashUserId(user);
       const bucket = userHash % 100;
@@ -618,7 +620,9 @@ export class FeatureFlagModel {
    * @remarks
    * This method is useful for debugging percentage rollouts.
    * The hash value is consistent for the same user ID.
-   * The bucket is computed as `hash % 100`.
+   * The bucket is computed as `hash % 100`, i.e. an integer 0-99. A percent of
+   * 99.9 therefore passes every bucket; for an explicit 100% rollout use
+   * `everyone: true` instead of `percent: 100` (which is rejected by the DB).
    *
    * @example
    * ```typescript

@@ -650,6 +650,81 @@ describe("FeatureFlagModel", () => {
     });
   });
 
+  describe("percentage rollout bounds", () => {
+    it("should treat percent 0 as no rollout for every user", async () => {
+      await model.create({ name: "percent-zero-flag", percent: 0 });
+      for (const user of ["user-a", "user-b", "user-c", "user-d"]) {
+        const active = await model.isActiveForUser({
+          name: "percent-zero-flag",
+          user,
+        });
+        expect(active).toBe(false);
+      }
+    });
+
+    it("should pass every user for percent 99.9", async () => {
+      await model.create({ name: "percent-999-flag", percent: 99.9 });
+      for (const user of [
+        "user-a", "user-b", "user-c", "user-d", "user-e", "user-f",
+        "user-g", "user-h", "user-i", "user-j",
+      ]) {
+        const active = await model.isActiveForUser({
+          name: "percent-999-flag",
+          user,
+        });
+        expect(active).toBe(true);
+      }
+    });
+
+    it("should evaluate the 0.1 boundary (only bucket 0 passes)", async () => {
+      await model.create({ name: "percent-01-flag", percent: 0.1 });
+      for (let i = 0; i < 100; i++) {
+        const user = `boundary-user-${i}`;
+        const hash = await model.hashUserId(user);
+        const bucket = hash % 100;
+        const active = await model.isActiveForUser({
+          name: "percent-01-flag",
+          user,
+        });
+        // bucket 0 (< 0.1) passes; only bucket 0 passes
+        expect(active).toBe(bucket < 0.1);
+      }
+    });
+
+    it("should treat percent 50 as a strict bucket cutoff", async () => {
+      await model.create({ name: "percent-fifty-flag", percent: 50 });
+      for (let i = 0; i < 20; i++) {
+        const user = `fifty-user-${i}`;
+        const hash = await model.hashUserId(user);
+        const bucket = hash % 100;
+        const active = await model.isActiveForUser({
+          name: "percent-fifty-flag",
+          user,
+        });
+        expect(active).toBe(bucket < 50);
+      }
+    });
+
+    it("should reject percent 100 at the database constraint", async () => {
+      await expect(
+        model.create({ name: "percent-100-flag", percent: 100 }),
+      ).rejects.toThrow();
+    });
+
+    it("should not change the result when everyone is set alongside percent", async () => {
+      await model.create({
+        name: "everyone-over-percent-flag",
+        everyone: false,
+        percent: 99.9,
+      });
+      const active = await model.isActiveForUser({
+        name: "everyone-over-percent-flag",
+        user: "any-user",
+      });
+      expect(active).toBe(false);
+    });
+  });
+
   describe("isEnabledForUser", () => {
     it("should return false for non-existent flag", async () => {
       const enabled = await model.isActiveForUser({

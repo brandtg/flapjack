@@ -114,7 +114,7 @@ When checking if a feature flag is active for a user, Flapjack evaluates rules i
 3. **Group Membership** (`groups: [...]`): If the user belongs to any specified group, returns `true`
 4. **External Subject Match** (`subjects: [...]`): If any provided subject matches a direct flag subject or a flag-group subject, returns `true`
 5. **Role Membership** (`roles: [...]`): If the user has any specified role, returns `true`
-6. **Percentage Rollout** (`percent: 0-99.9`): Uses consistent hashing to deterministically bucket users
+6. **Percentage Rollout** (`percent: 0-99.9`): Uses consistent hashing to deterministically bucket users (integer buckets 0-99; 99.9 passes every bucket — for an explicit 100% rollout use `everyone: true`)
 7. **Default**: Returns `false` if no conditions are met
 
 ## External Subject Targeting
@@ -349,20 +349,25 @@ const isInExperiment = await featureFlags.isActiveForUser({
   user: "user_123",
 });
 
-// Gradual rollout: Start at 5%, increase to 100% over time
+// Gradual rollout: start at 5%, increase over time
 await featureFlags.update(flagId, { percent: 5 });
 // ... monitor metrics ...
 await featureFlags.update(flagId, { percent: 25 });
 // ... monitor metrics ...
-await featureFlags.update(flagId, { percent: 100 });
+await featureFlags.update(flagId, { percent: 50 });
+// ... monitor metrics ...
+// Reach the end of the percentage path: for a true 100% rollout use everyone: true
+// (percent: 100 is rejected by the database constraint — 99.9 is the effective max)
+await featureFlags.update(flagId, { everyone: true });
 ```
 
 ### How User Bucketing Works
 
 - Uses **MurmurHash3** for consistent, deterministic hashing
-- Same user ID always maps to the same bucket (0-99)
+- Same user ID always maps to the same bucket (integer buckets 0-99, `hash % 100`)
 - Changing the user ID will change bucket assignment
 - Distribution is uniform across the user base
+- A `percent` of 99.9 passes every bucket; for an explicit 100% rollout, use `everyone: true` (`percent: 100` is rejected by the database constraint)
 
 ## API Reference
 
@@ -514,7 +519,7 @@ Always roll out features gradually:
 
 1. Start with internal users/roles (e.g., `roles: ["admin", "staff"]`)
 2. Expand to beta testers (e.g., `groups: ["beta_testers"]`)
-3. Percentage rollout (5% → 25% → 50% → 100%)
+3. Percentage rollout (5% → 25% → 50% → 99.9%)
 4. Enable for everyone (e.g., `everyone: true`)
 5. After stable, remove the flag from code and database
 

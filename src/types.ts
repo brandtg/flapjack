@@ -8,7 +8,11 @@ export type FeatureFlag = {
   name: string;
   /** Flip this flag on or off for everyone, overriding all other settings */
   everyone?: boolean | null;
-  /** Number between 0 and 99.9 for percentage rollout */
+  /**
+   * Number between 0 and 99.9 for percentage rollout. Users are bucketed into
+   * integer buckets 0-99 (`hash % 100`), so 99.9 passes every bucket. For an
+   * explicit 100% rollout use `everyone: true` instead.
+   */
   percent?: number;
   /** List of roles that have this feature flag enabled */
   roles?: string[];

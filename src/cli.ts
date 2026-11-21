@@ -40,7 +40,7 @@ const flagOptions = {
   },
   percent: {
     type: "number" as const,
-    describe: "Percentage rollout (0-99.9)",
+    describe: "Percentage rollout (0-99.9; for 100% use --everyone true)",
   },
   roles: {
     type: "array" as const,
@@ -1221,7 +1221,7 @@ cli.command(
         },
         percent: {
           type: "number",
-          describe: "Percentage rollout (0-99.9)",
+          describe: "Percentage rollout (0-99.9; for 100% use --everyone true)",
         },
         roles: {
           type: "array",
@@ -1471,6 +1471,7 @@ cli.command(
     try {
       const hash = await model.hashUserId(argv.userId!);
       const bucket = hash % 100;
+      // bucket is an integer 0-99; percent 99.9 passes every bucket.
       console.log(
         JSON.stringify(
           {
