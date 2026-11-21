@@ -14,7 +14,8 @@ A simple feature flags library with PostgreSQL integration, inspired by [django-
 - **PostgreSQL-backed**: Reliable, transactional flag storage with your existing database
 - **CLI included**: Manage feature flags from the command line
 - **TypeScript-first**: Full type safety with comprehensive TypeScript definitions
-- **Battle-tested**: Comprehensive test suite with 31+ tests
+- **Battle-tested**: Comprehensive test suite with 205 tests
+- **Time-limited flags**: Expiration dates with an `onExpired` event handler (grace period / metrics)
 
 ## Requirements
 
@@ -56,6 +57,8 @@ const featureFlags = new FeatureFlagModel(pool);
 // N.b. use a meaningful naming scheme like <feature>_<date>_<owner>
 const flag = await featureFlags.create({
   name: "enable_new_checkout_20250101_gbrandt",
+  // Optional: time-limit the flag (ISO date; evaluated must pass to stay active)
+  // expires: new Date("2026-12-31T00:00:00Z"),
 });
 
 // Check if a feature flag is active for a user
@@ -180,6 +183,44 @@ await featureFlags.isActiveForUser({
   roles: ["user"],
 });
 ```
+
+## Expiration and `onExpired` Handlers
+
+A flag can carry an `expires` date. When an expired flag is evaluated, the flag is treated as **inactive** — this is the strict default, even if no `onExpired` handler is set.
+
+You can attach an `onExpired` event handler to the model (or cached wrapper). The handler is fired whenever an expired flag is evaluated; if it returns a boolean, that value is used as the result (e.g. a grace period after expiry). If it returns `undefined` (or no handler is set), the flag evaluates as inactive.
+
+```typescript
+import { FeatureFlagModel } from "@brandtg/flapjack";
+
+const flagModel = new FeatureFlagModel(pool, {
+  onExpired: async ({ flag }) => {
+    // e.g. emit a usage metric / alert that an expired flag is still in use
+    await metrics.record("flag.expired_used", { flag: flag.name });
+    // return true to keep the flag active for a short grace period after expiry
+    return flag.expires && flag.expires > new Date(Date.now() - 24 * 60 * 60 * 1000);
+  },
+});
+
+// Create a flag that expires in 7 days
+await flagModel.create({
+  name: "temporary_experiment",
+  expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+});
+
+// Update an existing flag to expire in 24 hours
+await flagModel.update(flagId, { expires: new Date(Date.now() + 24 * 60 * 60 * 1000) });
+```
+
+The CLI also supports `--expires` (ISO 8601) on `create` and `update`, and `--clear-expires` on `update` to remove the expiration date:
+
+```bash
+flapjack create --name temporary_experiment --expires 2026-12-01T00:00:00Z
+flapjack update 1 --expires 2026-12-01T00:00:00Z
+flapjack update 1 --clear-expires
+```
+
+In the cached path, the wrapper stores the flag's expiry alongside its cached boolean and re-fires `onExpired` on every evaluation of a flag whose stored expiry has passed — so side effects keep firing even for cached results.
 
 ## Organizing Flags with Tags
 
@@ -410,6 +451,63 @@ Archives (hides) a feature flag while keeping the row for historical/audit purpo
 
 Archiving is **irreversible** (there is no `unarchive`) and the `archived` timestamp is immutable once set. The flag's name stays reserved permanently — a new flag cannot reuse it; create a new flag with a different name instead. The same `archive(id)` / `includeArchived` semantics apply to `FeatureFlagGroupModel`.
 
+#### `FeatureFlagModel(db, eventHandlers?)` — event handlers
+
+Construct with an optional `FeatureFlagEventHandlers` object. The `onExpired` handler is called whenever an expired flag is evaluated; see [Expiration and `onExpired` Handlers](#expiration-and-onexpired-handlers).
+
+`FeatureFlagEventHandlers` has one handler:
+
+- `onExpired?: ExpiredFeatureFlagEventHandler` — `({ flag }: { flag: FeatureFlag }) => Promise<boolean | undefined>`. Called for any expired flag. Return `true`/`false` to force the result (grace period / hard stop); return `undefined` to treat the flag as inactive. Exported from the package root as `ExpiredFeatureFlagEventHandler` (type-only).
+
+```typescript
+import { FeatureFlagModel } from "@brandtg/flapjack";
+import type { FeatureFlagEventHandlers } from "@brandtg/flapjack";
+
+const model = new FeatureFlagModel(pool, {
+  onExpired: async ({ flag }) => { /* return true/false/undefined */ },
+});
+```
+
+#### `isActiveForContext(params): Promise<boolean>`
+
+Checks if a feature flag is active for a context (user + external subjects). Accepts `user`, `roles`, `groups` and `subjects` (external subject IDs — direct flag or flag-group match).
+
+#### `areActiveForUser(params): Promise<Record<string, boolean>>`
+
+Checks multiple flags (or all of them if `names` is omitted) for a user. Accepts `user`, `roles`, `groups` and `subjects`.
+
+#### `areActiveForContext(params): Promise<Record<string, boolean>>`
+
+Checks multiple flags (or all of them if `names` is omitted) for a context. Accepts `user`, `roles`, `groups` and `subjects`.
+
+#### `getManyByName(names: string[], options?): Promise<FeatureFlag[]>`
+
+Retrieves multiple feature flags by name (may be shorter than the input if some names don't exist).
+
+#### `getMany(ids: number[], options?): Promise<FeatureFlag[]>`
+
+Retrieves multiple feature flags by ID (may be shorter than the input if some IDs don't exist).
+
+#### `getFeatureFlagsForSubject(subject: string, options?): Promise<FeatureFlag[]>`
+
+Gets all feature flags directly associated with an external subject identifier.
+
+#### `getSubjects(id: number): Promise<string[]>`
+
+Returns all external subject identifiers attached to a feature flag.
+
+#### `getLastModified(): Promise<number>`
+
+Returns the latest `modified` timestamp across all feature flags, in milliseconds since epoch. Returns -1 if the table is empty.
+
+#### `updateAll(groupId: number, changes): Promise<number>`
+
+Updates all feature flags in a group with the same changes (only `everyone`, `percent`, `roles`, `groups`, `users` are allowed). Returns the number of flags updated.
+
+#### `getGroupsForSubject(subject: string, options?): Promise<FeatureFlagGroup[]>`
+
+Returns all feature flag groups directly associated with an external subject identifier.
+
 #### `isActiveForUser(params): Promise<boolean>`
 
 Checks if a feature flag is active for a user based on the evaluation rules. Accepts the same `subjects` parameter as `isActiveForContext` (external subjects) and forwards it.
@@ -428,6 +526,9 @@ export DATABASE_URL="postgresql://user:pass@localhost/dbname"
 
 # Create a flag
 flapjack create --name my_feature --roles admin --note "Admin-only feature"
+
+# Create a flag with an expiration date
+flapjack create --name temporary --expires 2026-12-01T00:00:00Z
 
 # List all flags
 flapjack list
@@ -463,6 +564,10 @@ flapjack update 1 --percent 50 --everyone false
 
 # Clear specific fields
 flapjack update 1 --clear-roles --clear-percent
+
+# Set / clear an expiration date
+flapjack update 1 --expires 2026-12-01T00:00:00Z
+flapjack update 1 --clear-expires
 
 # Delete a flag (permanent — destroys all metadata)
 flapjack delete 1
@@ -560,6 +665,21 @@ await featureFlags.archive(flagId);
 // (archive is irreversible and the name stays reserved permanently)
 ```
 
+### Expiration and Grace Periods
+
+Flags can carry an `expires` date. Expired flags evaluate as **inactive** by default. Attach an `onExpired` handler to the model to (a) emit metrics/alerts when an expired flag is still in use and (b) opt into a grace period by returning a boolean from the handler:
+
+```typescript
+const flagModel = new FeatureFlagModel(pool, {
+  onExpired: async ({ flag }) => {
+    // fire metrics/alert; return true for a short grace period after expiry
+    return flag.expires && flag.expires > new Date(Date.now() - 24 * 60 * 60 * 1000);
+  },
+});
+```
+
+Clear the expiration date with `model.update(id, { expires: null })` or `flapjack update 1 --clear-expires`.
+
 ### Error Handling
 
 ```typescript
@@ -607,7 +727,7 @@ try {
 If `isActiveForUser()` returns false unexpectedly:
 
 1. Verify the flag exists: `flapjack get-by-name your_flag_name`
-2. Check the evaluation rules with `flapjack is-active`
+2. Check the evaluation rules with `flapjack is-active` (evaluation order: everyone -> users -> subjects -> groups -> roles -> percent -> default)
 3. Verify user/role/group matching is case-sensitive
 
 ### Percentage Rollout Not Working

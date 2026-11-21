@@ -1,4 +1,4 @@
-export type { FeatureFlag, FeatureFlagGroup } from "./types.js";
+export type { FeatureFlag, FeatureFlagGroup, ExpiredFeatureFlagEventHandler, FeatureFlagEventHandlers } from "./types.js";
 export { FeatureFlagModel, FeatureFlagGroupModel, hashUserId } from "./model.js";
 export {
   FeatureFlagCache,
