@@ -77,6 +77,9 @@ export class InMemoryCache<T> implements Cache<T> {
   }
 
   async set(key: string, value: T, ttl?: number): Promise<void> {
+    if (ttl !== undefined && (!Number.isFinite(ttl) || ttl <= 0)) {
+      throw new Error("ttl must be a positive number of seconds");
+    }
     // Re-inserting moves the key to most-recently-used
     this.cache.delete(key);
     const expiresAt = ttl !== undefined ? Date.now() + ttl * 1000 : undefined;
@@ -127,10 +130,19 @@ export class InMemoryCache<T> implements Cache<T> {
   }
 
   /**
-   * Get the current size of the cache (including expired entries).
+   * Get the number of live (non-expired) entries in the cache. Expired
+   * entries are not counted — they are only removed lazily on `get()` or by
+   * `clearExpired()`, so the underlying map may hold more than this.
    */
   size(): number {
-    return this.cache.size;
+    const now = Date.now();
+    let count = 0;
+    for (const entry of this.cache.values()) {
+      if (entry.expiresAt === undefined || now < entry.expiresAt) {
+        count++;
+      }
+    }
+    return count;
   }
 
   /**
@@ -155,6 +167,9 @@ export class FeatureFlagCache {
     cache: Cache<CachedFlagResult>;
     ttl?: number;
   }) {
+    if (!Number.isFinite(ttl) || ttl <= 0) {
+      throw new Error("ttl must be a positive number of seconds");
+    }
     this.model = model;
     this.cache = cache;
     this.ttl = ttl;

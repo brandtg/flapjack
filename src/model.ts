@@ -39,6 +39,86 @@ type UpdateChanges = Partial<
   Omit<FeatureFlag, "id" | "created" | "modified" | "archived">
 >;
 
+/**
+ * Thrown by `create`/`update` when the input is invalid (empty/whitespace
+ * name, out-of-range percent, or an invalid `expires` date). The message is
+ * meant to be shown to callers — friendly, not a raw Postgres exception.
+ */
+export class InvalidFlagInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidFlagInputError";
+  }
+}
+
+/**
+ * Validates a flag name: must be a non-empty string (after trimming).
+ * `null`/`undefined`/whitespace-only values are rejected.
+ */
+function validateName(name: unknown): void {
+  if (typeof name !== "string" || name.trim().length === 0) {
+    throw new InvalidFlagInputError(
+      "Feature flag name is required and cannot be empty",
+    );
+  }
+}
+
+/**
+ * Validates a percentage rollout value: must be a finite number between 0
+ * and 99.9. `null`/`undefined` are allowed (meaning "not set"). A percent of
+ * 0 is valid (no rollout); 100 is rejected — for a 100% rollout use
+ * `everyone: true`, which is the documented convention.
+ */
+function validatePercent(percent: unknown): void {
+  if (percent === undefined || percent === null) return;
+  if (
+    typeof percent !== "number" ||
+    !Number.isFinite(percent) ||
+    percent < 0 ||
+    percent > 99.9
+  ) {
+    throw new InvalidFlagInputError(
+      `percent must be a number between 0 and 99.9 (got ${typeof percent === "number" ? percent : JSON.stringify(percent)}); use everyone: true for a 100% rollout`,
+    );
+  }
+}
+
+/**
+ * Validates an expiration date: must be null/undefined (meaning "not set")
+ * or a valid date. An invalid date is rejected up front instead of failing
+ * later with a raw Postgres `22007` error. A date in the past is allowed —
+ * it simply means the flag is already expired.
+ */
+function validateExpires(expires: unknown): void {
+  if (expires === undefined || expires === null) return;
+  const date = expires instanceof Date ? expires : new Date(expires as any);
+  if (isNaN(date.getTime())) {
+    throw new InvalidFlagInputError(
+      `expires must be a valid date (got ${JSON.stringify(expires)})`,
+    );
+  }
+}
+
+/**
+ * Validates the shared name/percent/expires fields of a create/update call.
+ * `name` is always required (create: must be non-empty; update: when present
+ * must be non-empty — there is no clear-name path). `percent` and `expires`
+ * are optional; `null` means "clear" and is allowed, so only non-null
+ * values are checked.
+ */
+function validateFlagInput(
+  changes: { name?: unknown; percent?: unknown; expires?: unknown },
+  { requireName = false }: { requireName?: boolean } = {},
+): void {
+  if (requireName) {
+    validateName(changes.name);
+  } else if ("name" in changes) {
+    validateName(changes.name);
+  }
+  if ("percent" in changes) validatePercent(changes.percent);
+  if ("expires" in changes) validateExpires(changes.expires);
+}
+
 function mapRow(row: any): FeatureFlag {
   return {
     id: row.id,
@@ -141,6 +221,7 @@ export class FeatureFlagModel {
    * ```
    */
   async create(input: CreateInput): Promise<FeatureFlag> {
+    validateFlagInput(input, { requireName: true });
     const cols: string[] = ["name"];
     const vals: any[] = [input.name];
 
@@ -353,6 +434,7 @@ export class FeatureFlagModel {
     id: number,
     changes: UpdateChanges,
   ): Promise<FeatureFlag | null> {
+    validateFlagInput(changes);
     const sets: string[] = [];
     const vals: any[] = [];
 
@@ -555,8 +637,12 @@ export class FeatureFlagModel {
   /**
    * Evaluates a feature flag for a user based on flag configuration.
    * This is a stateless helper that performs the actual flag evaluation logic.
+   *
+   * @private Internal implementation detail — not part of the public surface.
+   * Callers should use the `isActiveForUser` / `isActiveForContext` /
+   * `areActiveForUser` / `areActiveForContext` methods instead.
    */
-  async evaluateFlagForUser(
+  private async evaluateFlagForUser(
     flag: FeatureFlag,
     {
       user,

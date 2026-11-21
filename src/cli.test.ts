@@ -91,6 +91,74 @@ describe("CLI smoke", () => {
     expect(res.stdout).toContain("flapjack create");
   });
 
+  it("create rejects an invalid --percent", async () => {
+    const res = await runCli(
+      ["create", "--name", "cli-bad-percent", "--percent", "100"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--percent");
+  });
+
+  it("create rejects an invalid --expires", async () => {
+    const res = await runCli(
+      ["create", "--name", "cli-bad-expires", "--expires", "not-a-date"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--expires");
+  });
+
+  it("update rejects an invalid --percent", async () => {
+    // create a flag first
+    const createRes = await runCli(
+      ["create", "--name", "cli-update-bad-percent"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(createRes.code).toBe(0);
+    const created = JSON.parse(createRes.stdout.trim());
+
+    const res = await runCli(
+      ["update", String(created.id), "--percent", "101"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--percent");
+  });
+
+  it("update rejects an invalid --expires", async () => {
+    const createRes = await runCli(
+      ["create", "--name", "cli-update-bad-expires"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(createRes.code).toBe(0);
+    const created = JSON.parse(createRes.stdout.trim());
+
+    const res = await runCli(
+      ["update", String(created.id), "--expires", "not-a-date"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--expires");
+  });
+
+  it("group-update-all rejects an invalid --percent", async () => {
+    // create a group and flag
+    const groupRes = await runCli(
+      ["group-create", "--name", "cli-bad-percent-group"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupRes.code).toBe(0);
+    const group = JSON.parse(groupRes.stdout.trim());
+
+    const res = await runCli(
+      ["group-update-all", String(group.id), "--percent", "999"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--percent");
+  });
+
   it("create/get/is-active/update/delete works", async () => {
     // create
     const createRes = await runCli(

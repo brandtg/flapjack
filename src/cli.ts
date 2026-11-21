@@ -3,7 +3,7 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import { Pool } from "pg";
-import { FeatureFlagModel, FeatureFlagGroupModel, hashUserId } from "./model.js";
+import { FeatureFlagModel, FeatureFlagGroupModel, hashUserId, InvalidFlagInputError } from "./model.js";
 import dotenv from "dotenv";
 
 dotenv.config({ quiet: true });
@@ -18,6 +18,39 @@ function createDatabase() {
   return new Pool({ connectionString });
 }
 
+/**
+ * Expected, user-facing failure (e.g. a flag/group is not found or already
+ * archived): the message is printed to stdout and the command exits with
+ * code 1. Anything else is an unexpected error — printed to stderr.
+ */
+class CliNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CliNotFoundError";
+  }
+}
+
+function parsePercentOption(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 99.9) {
+    throw new InvalidFlagInputError(
+      `--percent must be a number between 0 and 99.9 (got ${JSON.stringify(value)}); use --everyone true for a 100% rollout`,
+    );
+  }
+  return value;
+}
+
+function parseExpiresOption(value: string | undefined): Date | undefined {
+  if (value === undefined) return undefined;
+  const date = new Date(value);
+  if (isNaN(date.getTime())) {
+    throw new InvalidFlagInputError(
+      `--expires must be a parseable date (got ${JSON.stringify(value)}); use ISO 8601, e.g. 2026-12-31T23:59:59Z`,
+    );
+  }
+  return date;
+}
+
 const cli = yargs(hideBin(process.argv))
   .scriptName("flapjack")
   .usage("$0 <command> [options]")
@@ -26,7 +59,14 @@ const cli = yargs(hideBin(process.argv))
   .version()
   .alias("version", "v")
   .demandCommand(1, "You need to specify a command")
-  .strict();
+  .strict()
+  // Expected failures (handler-thrown errors and usage errors) are handled at
+  // the entry point, which prints a clean message and exits 1. Without this
+  //, yargs's default fail handler would print a stack trace and call
+  // process.exit(1) from inside the handler path, so nothing downstream runs.
+  .fail((msg, err) => {
+    throw err ?? new Error(msg);
+  });
 
 // Common options for feature flag fields
 const flagOptions = {
@@ -96,19 +136,18 @@ cli.command(
       const input: any = { name: argv.name };
 
       if (argv.everyone !== undefined) input.everyone = argv.everyone;
-      if (argv.percent !== undefined) input.percent = argv.percent;
+      if (argv.percent !== undefined)
+        input.percent = parsePercentOption(argv.percent);
       if (argv.roles !== undefined) input.roles = argv.roles as string[];
       if (argv.groups !== undefined) input.groups = argv.groups as string[];
       if (argv.users !== undefined) input.users = argv.users as string[];
       if (argv.tags !== undefined) input.tags = argv.tags as string[];
       if (argv.note !== undefined) input.note = argv.note;
-      if (argv.expires !== undefined) input.expires = new Date(argv.expires);
+      if (argv.expires !== undefined)
+        input.expires = parseExpiresOption(argv.expires);
 
       const flag = await model.create(input);
       console.log(JSON.stringify(flag, null, 2));
-    } catch (error) {
-      console.error("Error creating feature flag:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -138,12 +177,8 @@ cli.command(
       if (flag) {
         console.log(JSON.stringify(flag, null, 2));
       } else {
-        console.log(`Feature flag with ID ${argv.id} not found`);
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag with ID ${argv.id} not found`);
       }
-    } catch (error) {
-      console.error("Error getting feature flag:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -173,12 +208,8 @@ cli.command(
       if (flag) {
         console.log(JSON.stringify(flag, null, 2));
       } else {
-        console.log(`Feature flag with name "${argv.name}" not found`);
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag with name "${argv.name}" not found`);
       }
-    } catch (error) {
-      console.error("Error getting feature flag:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -201,9 +232,6 @@ cli.command(
         includeArchived: argv.includeArchived,
       });
       console.log(JSON.stringify(flags, null, 2));
-    } catch (error) {
-      console.error("Error listing feature flags:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -231,9 +259,6 @@ cli.command(
         includeArchived: argv.includeArchived,
       });
       console.log(JSON.stringify(flags, null, 2));
-    } catch (error) {
-      console.error("Error listing feature flags by tag:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -301,7 +326,8 @@ cli.command(
 
       // Percent: clear flag takes precedence
       if ((argv as any).clearPercent) changes.percent = null;
-      else if (argv.percent !== undefined) changes.percent = argv.percent;
+      else if (argv.percent !== undefined)
+        changes.percent = parsePercentOption(argv.percent);
 
       // Roles: clear flag takes precedence
       if ((argv as any).clearRoles) changes.roles = null;
@@ -327,18 +353,14 @@ cli.command(
       // Expires: clear flag takes precedence
       if ((argv as any).clearExpires) changes.expires = null;
       else if (argv.expires !== undefined)
-        changes.expires = new Date(argv.expires);
+        changes.expires = parseExpiresOption(argv.expires);
 
       const flag = await model.update(argv.id!, changes);
       if (flag) {
         console.log(JSON.stringify(flag, null, 2));
       } else {
-        console.log(`Feature flag with ID ${argv.id} not found`);
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag with ID ${argv.id} not found`);
       }
-    } catch (error) {
-      console.error("Error updating feature flag:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -364,12 +386,8 @@ cli.command(
       if (success) {
         console.log(`Feature flag with ID ${argv.id} deleted successfully`);
       } else {
-        console.log(`Feature flag with ID ${argv.id} not found`);
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag with ID ${argv.id} not found`);
       }
-    } catch (error) {
-      console.error("Error deleting feature flag:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -395,14 +413,8 @@ cli.command(
       if (flag) {
         console.log(JSON.stringify(flag, null, 2));
       } else {
-        console.log(
-          `Feature flag with ID ${argv.id} not found or already archived`,
-        );
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag with ID ${argv.id} not found or already archived`);
       }
-    } catch (error) {
-      console.error("Error archiving feature flag:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -465,9 +477,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error checking feature flag:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -529,9 +538,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error checking multiple feature flags:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -594,9 +600,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error checking feature flag context:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -635,9 +638,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error adding subject:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -676,9 +676,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error removing subject:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -711,9 +708,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error listing subjects:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -775,9 +769,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error checking multiple feature flag contexts:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -810,9 +801,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error listing flags by subject:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -847,9 +835,6 @@ cli.command(
         note: argv.note,
       });
       console.log(JSON.stringify(group, null, 2));
-    } catch (error) {
-      console.error("Error creating feature flag group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -872,9 +857,6 @@ cli.command(
         includeArchived: argv.includeArchived,
       });
       console.log(JSON.stringify(groups, null, 2));
-    } catch (error) {
-      console.error("Error listing feature flag groups:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -902,13 +884,9 @@ cli.command(
         includeArchived: argv.includeArchived,
       });
       if (!group) {
-        console.log(`Feature flag group with ID ${argv.id} not found`);
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag group with ID ${argv.id} not found`);
       }
       console.log(JSON.stringify(group, null, 2));
-    } catch (error) {
-      console.error("Error getting feature flag group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -936,13 +914,9 @@ cli.command(
         includeArchived: argv.includeArchived,
       });
       if (!group) {
-        console.log(`Feature flag group with name "${argv.name}" not found`);
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag group with name "${argv.name}" not found`);
       }
       console.log(JSON.stringify(group, null, 2));
-    } catch (error) {
-      console.error("Error getting feature flag group by name:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -986,13 +960,9 @@ cli.command(
 
       const group = await model.update(argv.id!, changes);
       if (!group) {
-        console.log(`Feature flag group with ID ${argv.id} not found`);
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag group with ID ${argv.id} not found`);
       }
       console.log(JSON.stringify(group, null, 2));
-    } catch (error) {
-      console.error("Error updating feature flag group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1016,13 +986,9 @@ cli.command(
     try {
       const deleted = await model.delete(argv.id!);
       if (!deleted) {
-        console.log(`Feature flag group with ID ${argv.id} not found`);
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag group with ID ${argv.id} not found`);
       }
       console.log(`Feature flag group with ID ${argv.id} deleted successfully`);
-    } catch (error) {
-      console.error("Error deleting feature flag group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1046,15 +1012,9 @@ cli.command(
     try {
       const group = await model.archive(argv.id!);
       if (!group) {
-        console.log(
-          `Feature flag group with ID ${argv.id} not found or already archived`,
-        );
-        process.exit(1);
+        throw new CliNotFoundError(`Feature flag group with ID ${argv.id} not found or already archived`);
       }
       console.log(JSON.stringify(group, null, 2));
-    } catch (error) {
-      console.error("Error archiving feature flag group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1093,9 +1053,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error adding feature flag to group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1137,9 +1094,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error removing feature flag from group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1172,9 +1126,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error listing flags for group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1207,9 +1158,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error listing groups for feature flag:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1280,7 +1228,8 @@ cli.command(
       else if (argv.everyone !== undefined) changes.everyone = argv.everyone;
 
       if ((argv as any).clearPercent) changes.percent = null;
-      else if (argv.percent !== undefined) changes.percent = argv.percent;
+      else if (argv.percent !== undefined)
+        changes.percent = parsePercentOption(argv.percent);
 
       if ((argv as any).clearRoles) changes.roles = null;
       else if (argv.roles !== undefined) changes.roles = argv.roles as string[];
@@ -1305,9 +1254,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error updating all flags in group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1346,9 +1292,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error adding subject to group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1387,9 +1330,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error removing subject from group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1422,9 +1362,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error listing subjects for group:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1457,9 +1394,6 @@ cli.command(
           2,
         ),
       );
-    } catch (error) {
-      console.error("Error listing groups by subject:", error);
-      process.exit(1);
     } finally {
       await db.end();
     }
@@ -1502,6 +1436,10 @@ async function main() {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-    console.error("Error:", err);
+    if (err instanceof CliNotFoundError) {
+      console.log(err.message);
+    } else {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
     process.exit(1);
   });

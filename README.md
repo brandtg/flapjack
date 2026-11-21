@@ -14,7 +14,7 @@ A simple feature flags library with PostgreSQL integration, inspired by [django-
 - **PostgreSQL-backed**: Reliable, transactional flag storage with your existing database
 - **CLI included**: Manage feature flags from the command line
 - **TypeScript-first**: Full type safety with comprehensive TypeScript definitions
-- **Battle-tested**: Comprehensive test suite with 205 tests
+- **Battle-tested**: Comprehensive test suite with 218 tests
 - **Time-limited flags**: Expiration dates with an `onExpired` event handler (grace period / metrics)
 
 ## Requirements

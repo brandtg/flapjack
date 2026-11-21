@@ -50,8 +50,8 @@ describe("InMemoryCache", () => {
     // Wait for first key to expire
     await new Promise((resolve) => setTimeout(resolve, 150));
 
-    // Size should still be 2 (expired entries not cleaned yet)
-    expect(cache.size()).toBe(2);
+    // size() counts live entries only, so the expired key is excluded
+    expect(cache.size()).toBe(1);
 
     // Access expired key should clean it up
     expect(await cache.get("key1")).toBeUndefined();
@@ -139,6 +139,13 @@ describe("InMemoryCache", () => {
     expect(() => new InMemoryCache({ maxSize: 1.5 })).toThrow(/maxSize/);
   });
 
+  it("should reject a non-positive or non-finite ttl", async () => {
+    await expect(cache.set("key", "value", 0)).rejects.toThrow(/ttl/);
+    await expect(cache.set("key", "value", -1)).rejects.toThrow(/ttl/);
+    await expect(cache.set("key", "value", NaN)).rejects.toThrow(/ttl/);
+    await expect(cache.set("key", "value", Infinity)).rejects.toThrow(/ttl/);
+  });
+
   it("should clear all entries", async () => {
     await cache.set("key1", "value1");
     await cache.set("key2", "value2");
@@ -174,6 +181,13 @@ describe("FeatureFlagCache", () => {
       cache,
       ttl: 1,
     });
+  });
+
+  it("should reject a non-positive or non-finite ttl", () => {
+    expect(() => new FeatureFlagCache({ model: mockModel, cache, ttl: 0 })).toThrow(/ttl/);
+    expect(() => new FeatureFlagCache({ model: mockModel, cache, ttl: -1 })).toThrow(/ttl/);
+    expect(() => new FeatureFlagCache({ model: mockModel, cache, ttl: NaN })).toThrow(/ttl/);
+    expect(() => new FeatureFlagCache({ model: mockModel, cache, ttl: Infinity })).toThrow(/ttl/);
   });
 
   it("should call model on cache miss", async () => {
