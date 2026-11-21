@@ -8,3 +8,4 @@ export {
   type CachedFlagResult,
 } from "./cache.js";
 export { runMigrations, type MigrationOptions } from "./migrate.js";
+export { InvalidFlagInputError } from "./model.js";

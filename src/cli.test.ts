@@ -91,6 +91,49 @@ describe("CLI smoke", () => {
     expect(res.stdout).toContain("flapjack create");
   });
 
+  it("prints a usage hint on usage errors (unknown flag)", async () => {
+    const res = await runCli(["get", "1", "--bogus-flag"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--help");
+    expect(res.stderr).toContain("Unknown argument");
+  });
+
+  it("prints a usage hint on usage errors (missing command)", async () => {
+    const res = await runCli([], { DATABASE_URL: TEST_DB_URL });
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--help");
+    expect(res.stderr).toContain("You need to specify a command");
+  });
+
+  it("prints a clean one-line error for handler errors (no usage hint)", async () => {
+    const res = await runCli(["get", "999999"], { DATABASE_URL: TEST_DB_URL });
+    expect(res.code).toBe(1);
+    expect(res.stderr).not.toContain("--help");
+    expect(res.stdout).toContain("not found");
+  });
+
+  it("rejects an invalid --percent before requiring a database connection", async () => {
+    const res = await runCli(
+      ["create", "--name", "cli-no-env", "--percent", "100"],
+      { DATABASE_URL: "" },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--percent");
+    expect(res.stderr).not.toContain("DATABASE_URL is not set");
+  });
+
+  it("rejects an invalid --expires before requiring a database connection", async () => {
+    const res = await runCli(
+      ["update", "1", "--expires", "not-a-date"],
+      { DATABASE_URL: "" },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--expires");
+    expect(res.stderr).not.toContain("DATABASE_URL is not set");
+  });
+
   it("create rejects an invalid --percent", async () => {
     const res = await runCli(
       ["create", "--name", "cli-bad-percent", "--percent", "100"],

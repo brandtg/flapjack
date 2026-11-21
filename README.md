@@ -14,7 +14,7 @@ A simple feature flags library with PostgreSQL integration, inspired by [django-
 - **PostgreSQL-backed**: Reliable, transactional flag storage with your existing database
 - **CLI included**: Manage feature flags from the command line
 - **TypeScript-first**: Full type safety with comprehensive TypeScript definitions
-- **Battle-tested**: Comprehensive test suite with 218 tests
+- **Battle-tested**: Comprehensive test suite with 229 tests
 - **Time-limited flags**: Expiration dates with an `onExpired` event handler (grace period / metrics)
 
 ## Requirements
@@ -120,6 +120,8 @@ When checking if a feature flag is active for a user, Flapjack evaluates rules i
 6. **Percentage Rollout** (`percent: 0-99.9`): Uses consistent hashing to deterministically bucket users (integer buckets 0-99; 99.9 passes every bucket — for an explicit 100% rollout use `everyone: true`)
 7. **Default**: Returns `false` if no conditions are met
 
+`expires` does not participate in this order. An expired flag is still evaluated under the rules above — `everyone` wins even for an expired flag — but the `onExpired` handler (if set) fires first and, if it returns `true`/`false`, that value is used as the result instead. See [Expiration and `onExpired` Handlers](#expiration-and-onexpired-handlers).
+
 ## External Subject Targeting
 
 Use subjects when identity/group membership is managed outside Flapjack (for example, tenant IDs from another system).
@@ -186,9 +188,9 @@ await featureFlags.isActiveForUser({
 
 ## Expiration and `onExpired` Handlers
 
-A flag can carry an `expires` date. When an expired flag is evaluated, the flag is treated as **inactive** — this is the strict default, even if no `onExpired` handler is set.
+A flag can carry an `expires` date. Expiry is **signal, not a hard stop**: when an expired flag is evaluated, the evaluation proceeds under the normal rules (everyone -> users -> subjects -> groups -> roles -> percent -> default), so `everyone: true` wins even when the flag has expired. The `expires` date exists so the `onExpired` handler fires — giving you metrics/alerts when a flag used past its intended lifetime.
 
-You can attach an `onExpired` event handler to the model (or cached wrapper). The handler is fired whenever an expired flag is evaluated; if it returns a boolean, that value is used as the result (e.g. a grace period after expiry). If it returns `undefined` (or no handler is set), the flag evaluates as inactive.
+You can attach an `onExpired` event handler to the model (or cached wrapper). The handler fires whenever an expired flag is evaluated; if it returns a `true`/`false`, that value is used as the result (e.g. a grace period after expiry). If it returns `undefined`/`null` (or no handler is set), the flag falls through to the normal evaluation rules.
 
 ```typescript
 import { FeatureFlagModel } from "@brandtg/flapjack";
@@ -419,7 +421,7 @@ await featureFlags.update(flagId, { everyone: true });
 
 #### `create(input: CreateInput): Promise<FeatureFlag>`
 
-Creates a new feature flag.
+Creates a new feature flag. Passing `undefined` for an optional field leaves it unset (same as omitting the key); passing `null` explicitly writes SQL NULL.
 
 #### `getById(id: number, options?: { includeArchived?: boolean }): Promise<FeatureFlag | null>`
 
@@ -439,7 +441,7 @@ Lists all feature flags carrying the given tag (exact match), ordered by ID. Arc
 
 #### `update(id: number, changes: UpdateChanges): Promise<FeatureFlag | null>`
 
-Updates a feature flag. Returns the updated flag or null if not found.
+Updates a feature flag. Returns the updated flag or null if not found. Passing `undefined` for a field leaves it unchanged (same as omitting the key); passing `null` clears it.
 
 #### `delete(id: number): Promise<boolean>`
 
@@ -451,13 +453,17 @@ Archives (hides) a feature flag while keeping the row for historical/audit purpo
 
 Archiving is **irreversible** (there is no `unarchive`) and the `archived` timestamp is immutable once set. The flag's name stays reserved permanently — a new flag cannot reuse it; create a new flag with a different name instead. The same `archive(id)` / `includeArchived` semantics apply to `FeatureFlagGroupModel`.
 
+#### `InvalidFlagInputError`
+
+Exported from the package root (`import { InvalidFlagInputError } from "@brandtg/flapjack"`). Thrown by `create`/`update` when input is invalid — empty name (after trim), percent outside 0–99.9, or an unparseable `expires` date. The message is friendly and meant to be shown to callers; catch it to show a validation error rather than a raw Postgres exception.
+
 #### `FeatureFlagModel(db, eventHandlers?)` — event handlers
 
 Construct with an optional `FeatureFlagEventHandlers` object. The `onExpired` handler is called whenever an expired flag is evaluated; see [Expiration and `onExpired` Handlers](#expiration-and-onexpired-handlers).
 
 `FeatureFlagEventHandlers` has one handler:
 
-- `onExpired?: ExpiredFeatureFlagEventHandler` — `({ flag }: { flag: FeatureFlag }) => Promise<boolean | undefined>`. Called for any expired flag. Return `true`/`false` to force the result (grace period / hard stop); return `undefined` to treat the flag as inactive. Exported from the package root as `ExpiredFeatureFlagEventHandler` (type-only).
+- `onExpired?: ExpiredFeatureFlagEventHandler` — `({ flag }: { flag: FeatureFlag }) => Promise<boolean | undefined>`. Called for any expired flag. Return `true`/`false` to force the result (grace period / hard stop); return `undefined`/`null` (or set no handler) and the flag falls through to the normal evaluation rules. Exported from the package root as `ExpiredFeatureFlagEventHandler` (type-only).
 
 ```typescript
 import { FeatureFlagModel } from "@brandtg/flapjack";
@@ -667,7 +673,7 @@ await featureFlags.archive(flagId);
 
 ### Expiration and Grace Periods
 
-Flags can carry an `expires` date. Expired flags evaluate as **inactive** by default. Attach an `onExpired` handler to the model to (a) emit metrics/alerts when an expired flag is still in use and (b) opt into a grace period by returning a boolean from the handler:
+Flags can carry an `expires` date. Expiry is **signal, not a hard stop**: an expired flag is still evaluated under the normal rules (`everyone: true` wins even for an expired flag). Attach an `onExpired` handler to the model to (a) emit metrics/alerts when an expired flag is still in use and (b) opt into a grace period by returning a boolean from the handler:
 
 ```typescript
 const flagModel = new FeatureFlagModel(pool, {

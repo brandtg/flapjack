@@ -112,11 +112,13 @@ function validateFlagInput(
 ): void {
   if (requireName) {
     validateName(changes.name);
-  } else if ("name" in changes) {
+  } else if ("name" in changes && changes.name !== undefined) {
+    // An explicit `undefined` name means "not set" — skip validation and
+    // the assignment (same as omitting the key).
     validateName(changes.name);
   }
-  if ("percent" in changes) validatePercent(changes.percent);
-  if ("expires" in changes) validateExpires(changes.expires);
+  if ("percent" in changes && changes.percent !== undefined) validatePercent(changes.percent);
+  if ("expires" in changes && changes.expires !== undefined) validateExpires(changes.expires);
 }
 
 function mapRow(row: any): FeatureFlag {
@@ -198,6 +200,9 @@ export class FeatureFlagModel {
    * Creates a new feature flag in the database.
    *
    * @param input - Feature flag configuration
+   * @remarks
+   * Passing `undefined` for an optional field is the same as omitting it — the
+   * column stays at its default/NULL. Passing `null` explicitly writes SQL NULL.
    * @param input.name - Unique name for the feature flag (required)
    * @param input.everyone - Optional boolean to enable/disable for everyone (overrides all other settings)
    * @param input.percent - Optional percentage rollout (0-99.9; for 100% use `everyone: true`)
@@ -225,37 +230,17 @@ export class FeatureFlagModel {
     const cols: string[] = ["name"];
     const vals: any[] = [input.name];
 
-    if ("everyone" in input) {
-      cols.push("everyone");
-      vals.push(input.everyone ?? null);
-    }
-    if ("percent" in input) {
-      cols.push("percent");
-      vals.push(input.percent ?? null);
-    }
-    if ("roles" in input) {
-      cols.push("roles");
-      vals.push(input.roles ?? null);
-    }
-    if ("groups" in input) {
-      cols.push("groups");
-      vals.push(input.groups ?? null);
-    }
-    if ("users" in input) {
-      cols.push("users");
-      vals.push(input.users ?? null);
-    }
-    if ("tags" in input) {
-      cols.push("tags");
-      vals.push(input.tags ?? null);
-    }
-    if ("note" in input) {
-      cols.push("note");
-      vals.push(input.note ?? null);
-    }
-    if ("expires" in input) {
-      cols.push("expires");
-      vals.push(input.expires ?? null);
+    // Skip keys whose value is `undefined`: an explicit `undefined` means
+    // "not set" (same as omitting the key), not "clear" (which is `null`).
+    // `in` is used to distinguish a present-but-`undefined` key from an
+    // absent one — an absent key is skipped entirely; a present `null` is
+    // written as SQL NULL.
+    for (const key of ["everyone", "percent", "roles", "groups", "users", "tags", "note", "expires"] as const) {
+      if (!(key in input)) continue;
+      const value = input[key];
+      if (value === undefined) continue;
+      cols.push(key);
+      vals.push(value ?? null);
     }
 
     const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
@@ -416,6 +401,7 @@ export class FeatureFlagModel {
    * @remarks
    * The modified timestamp is automatically updated by a database trigger.
    * Pass `null` for a field to clear it (e.g., `everyone: null` removes the override).
+   * Passing `undefined` for a field leaves it unchanged (treated the same as omitting the key).
    * If no changes are provided, returns the flag unchanged.
    *
    * @example
@@ -438,41 +424,23 @@ export class FeatureFlagModel {
     const sets: string[] = [];
     const vals: any[] = [];
 
+    // Skip keys whose value is `undefined`: an explicit `undefined` means
+    // "not set" (same as omitting the key), not "clear" (which is `null`).
+    // `in` is used to distinguish a present-but-`undefined` key from an
+    // absent one — an absent key is skipped entirely; a present `null` is
+    // written as SQL NULL.
     if ("name" in changes) {
-      sets.push(`name = $${sets.length + 1}`);
-      vals.push(changes.name ?? null);
+      if (changes.name !== undefined) {
+        sets.push(`name = $${sets.length + 1}`);
+        vals.push(changes.name ?? null);
+      }
     }
-    if ("everyone" in changes) {
-      sets.push(`everyone = $${sets.length + 1}`);
-      vals.push(changes.everyone ?? null);
-    }
-    if ("percent" in changes) {
-      sets.push(`percent = $${sets.length + 1}`);
-      vals.push(changes.percent ?? null);
-    }
-    if ("roles" in changes) {
-      sets.push(`roles = $${sets.length + 1}`);
-      vals.push(changes.roles ?? null);
-    }
-    if ("groups" in changes) {
-      sets.push(`groups = $${sets.length + 1}`);
-      vals.push(changes.groups ?? null);
-    }
-    if ("users" in changes) {
-      sets.push(`users = $${sets.length + 1}`);
-      vals.push(changes.users ?? null);
-    }
-    if ("tags" in changes) {
-      sets.push(`tags = $${sets.length + 1}`);
-      vals.push(changes.tags ?? null);
-    }
-    if ("note" in changes) {
-      sets.push(`note = $${sets.length + 1}`);
-      vals.push(changes.note ?? null);
-    }
-    if ("expires" in changes) {
-      sets.push(`expires = $${sets.length + 1}`);
-      vals.push(changes.expires ?? null);
+    for (const key of ["everyone", "percent", "roles", "groups", "users", "tags", "note", "expires"] as const) {
+      if (!(key in changes)) continue;
+      const value = changes[key];
+      if (value === undefined) continue;
+      sets.push(`${key} = $${sets.length + 1}`);
+      vals.push(value ?? null);
     }
 
     if (sets.length === 0) {
@@ -750,6 +718,12 @@ export class FeatureFlagModel {
    * @returns true if the flag is active for the user, false otherwise
    *
    * @remarks
+   * If the flag is expired, the `onExpired` handler (if set) fires first and
+   * its boolean return (if any) is used as the result — e.g. a grace period.
+   * Otherwise (no handler, or the handler returns `undefined`/null) the flag
+   * falls through to the normal rules below — expiry never suppresses them,
+   * so `everyone: true` wins even for an expired flag.
+   *
    * Evaluation order (first match wins):
    * 1. Everyone override (if set to true/false, returns immediately)
    * 2. User ID is in the users list
@@ -801,9 +775,10 @@ export class FeatureFlagModel {
   /**
    * Fires the `onExpired` handler for a flag that has expired.
    *
-   * Returns the handler's boolean result if it provided one; otherwise returns
-   * `undefined` (meaning "no override" — the caller should treat the flag as
-   * inactive). Does nothing for non-expired flags or when no handler is set.
+   * Returns the handler's boolean result if it provided one (`true`/`false`);
+   * otherwise returns `undefined` (meaning "no override" — the caller falls
+   * through to the normal evaluation rules). Does nothing for non-expired
+   * flags or when no handler is set.
    *
    * Exported so the cache layer can fire the same handler on every evaluation
    * (including cache hits) instead of only on cache misses.
@@ -811,7 +786,8 @@ export class FeatureFlagModel {
   async fireExpiredHandler(flag: FeatureFlag): Promise<boolean | undefined> {
     if (!flag.expires || flag.expires > new Date()) return undefined;
     if (!this.eventHandlers?.onExpired) return undefined;
-    return this.eventHandlers.onExpired({ flag });
+    const result = await this.eventHandlers.onExpired({ flag });
+    return result ?? undefined;
   }
 
   /**
@@ -837,14 +813,15 @@ export class FeatureFlagModel {
       return false;
     }
 
-    // Expired flag: trigger onExpired (if set); if the handler returns a
-    // boolean, use it. Otherwise the flag is inactive regardless of normal rules.
+    // Expired flag: trigger onExpired (if set). A boolean the handler returns
+    // is honored as the result (e.g. a grace period); an `undefined`/null
+    // return means "no override" and the flag falls through to the normal
+    // evaluation rules — expiry never suppresses those (in particular,
+    // `everyone: true` wins even when the flag has expired). Expiry is signal:
+    // it exists so the handler fires and can emit metrics/alerts.
     const expiredOverride = await this.fireExpiredHandler(flag);
     if (expiredOverride !== undefined) {
       return expiredOverride;
-    }
-    if (flag.expires && flag.expires <= new Date()) {
-      return false;
     }
 
     const subjectMatchedFlagIds = await this.getSubjectMatchedFlagIds(subjects);
@@ -872,6 +849,12 @@ export class FeatureFlagModel {
    * This method fetches all flags in a single query for efficiency.
    * If names is provided, only those flags are checked. Non-existent flags are marked as false.
    * If names is not provided, all flags in the database are checked.
+   * If the flag is expired, the `onExpired` handler (if set) fires first and
+   * its boolean return (if any) is used as the result — e.g. a grace period.
+   * Otherwise (no handler, or the handler returns `undefined`/null) the flag
+   * falls through to the normal rules below — expiry never suppresses them,
+   * so `everyone: true` wins even for an expired flag.
+   *
    * Evaluation order for each flag (first match wins):
    * 1. Everyone override (if set to true/false, returns immediately)
    * 2. User ID is in the users list
@@ -969,15 +952,15 @@ export class FeatureFlagModel {
         continue;
       }
 
-      // Expired flag: trigger onExpired (if set); if the handler returns a
-      // boolean, use it. Otherwise the flag is inactive regardless of normal rules.
+      // Expired flag: trigger onExpired (if set). A boolean the handler returns
+      // is honored as the result (e.g. a grace period); an `undefined`/null
+      // return means "no override" and the flag falls through to the normal
+      // evaluation rules — expiry never suppresses those (in particular,
+      // `everyone: true` wins even when the flag has expired). Expiry is signal:
+      // it exists so the handler fires and can emit metrics/alerts.
       const expiredOverride = await this.fireExpiredHandler(flag);
       if (expiredOverride !== undefined) {
         result[name] = expiredOverride;
-        continue;
-      }
-      if (flag.expires && flag.expires <= new Date()) {
-        result[name] = false;
         continue;
       }
 

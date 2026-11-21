@@ -266,7 +266,8 @@ export class FeatureFlagCache {
       // handed to the shared model helper, which no-ops for non-expired flags.
       // Legacy (boolean) entries carry no expiry, so nothing is fetched — the
       // original cache miss already fired the handler for those.
-      // The cached result stands — the handler's return value is ignored here.
+      // The cached result stands — the handler's return value is ignored here,
+      // so an extended grace period written later is not retroactively applied.
       if (entry.flagExpires !== null && entry.flagExpires <= Date.now()) {
         const flag = await this.model.getByName(name);
         if (flag) {

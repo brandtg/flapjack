@@ -65,6 +65,14 @@ const cli = yargs(hideBin(process.argv))
   //, yargs's default fail handler would print a stack trace and call
   // process.exit(1) from inside the handler path, so nothing downstream runs.
   .fail((msg, err) => {
+    // Usage errors (unknown flags, missing positionals, ...) carry a `msg`
+    // but no `err`: they mean the invocation itself was wrong, so print a
+    // short hint pointing at the help text — a bare "Error: ..." line with
+    // no usage hint leaves the user guessing. Handler-thrown errors carry
+    // an `err` (msg is null) and keep clean single-line output.
+    if (msg) {
+      console.error(`Run \`flapjack --help\` for usage.`);
+    }
     throw err ?? new Error(msg);
   });
 
@@ -129,23 +137,26 @@ cli.command(
       .demandOption("name", "Feature flag name is required");
   },
   async (argv) => {
+    // Validate and parse options before creating a database pool, so an
+    // invalid --percent/--expires is reported even when DATABASE_URL is
+    // missing (or the database is unreachable).
+    const input: any = { name: argv.name };
+
+    if (argv.everyone !== undefined) input.everyone = argv.everyone;
+    if (argv.percent !== undefined)
+      input.percent = parsePercentOption(argv.percent);
+    if (argv.roles !== undefined) input.roles = argv.roles as string[];
+    if (argv.groups !== undefined) input.groups = argv.groups as string[];
+    if (argv.users !== undefined) input.users = argv.users as string[];
+    if (argv.tags !== undefined) input.tags = argv.tags as string[];
+    if (argv.note !== undefined) input.note = argv.note;
+    if (argv.expires !== undefined)
+      input.expires = parseExpiresOption(argv.expires);
+
     const db = createDatabase();
     const model = new FeatureFlagModel(db);
 
     try {
-      const input: any = { name: argv.name };
-
-      if (argv.everyone !== undefined) input.everyone = argv.everyone;
-      if (argv.percent !== undefined)
-        input.percent = parsePercentOption(argv.percent);
-      if (argv.roles !== undefined) input.roles = argv.roles as string[];
-      if (argv.groups !== undefined) input.groups = argv.groups as string[];
-      if (argv.users !== undefined) input.users = argv.users as string[];
-      if (argv.tags !== undefined) input.tags = argv.tags as string[];
-      if (argv.note !== undefined) input.note = argv.note;
-      if (argv.expires !== undefined)
-        input.expires = parseExpiresOption(argv.expires);
-
       const flag = await model.create(input);
       console.log(JSON.stringify(flag, null, 2));
     } finally {
@@ -312,49 +323,52 @@ cli.command(
       });
   },
   async (argv) => {
+    // Validate and parse options before creating a database pool, so an
+    // invalid --percent/--expires is reported even when DATABASE_URL is
+    // missing (or the database is unreachable).
+    const changes: any = {};
+
+    if (argv.name !== undefined) changes.name = argv.name;
+
+    // Everyone: clear flag takes precedence
+    if ((argv as any).clearEveryone) changes.everyone = null;
+    else if (argv.everyone !== undefined) changes.everyone = argv.everyone;
+
+    // Percent: clear flag takes precedence
+    if ((argv as any).clearPercent) changes.percent = null;
+    else if (argv.percent !== undefined)
+      changes.percent = parsePercentOption(argv.percent);
+
+    // Roles: clear flag takes precedence
+    if ((argv as any).clearRoles) changes.roles = null;
+    else if (argv.roles !== undefined) changes.roles = argv.roles as string[];
+
+    // Groups: clear flag takes precedence
+    if ((argv as any).clearGroups) changes.groups = null;
+    else if (argv.groups !== undefined)
+      changes.groups = argv.groups as string[];
+
+    // Users: clear flag takes precedence
+    if ((argv as any).clearUsers) changes.users = null;
+    else if (argv.users !== undefined) changes.users = argv.users as string[];
+
+    // Tags: clear flag takes precedence
+    if ((argv as any).clearTags) changes.tags = null;
+    else if (argv.tags !== undefined) changes.tags = argv.tags as string[];
+
+    // Note: clear flag takes precedence
+    if ((argv as any).clearNote) changes.note = null;
+    else if (argv.note !== undefined) changes.note = argv.note;
+
+    // Expires: clear flag takes precedence
+    if ((argv as any).clearExpires) changes.expires = null;
+    else if (argv.expires !== undefined)
+      changes.expires = parseExpiresOption(argv.expires);
+
     const db = createDatabase();
     const model = new FeatureFlagModel(db);
 
     try {
-      const changes: any = {};
-
-      if (argv.name !== undefined) changes.name = argv.name;
-
-      // Everyone: clear flag takes precedence
-      if ((argv as any).clearEveryone) changes.everyone = null;
-      else if (argv.everyone !== undefined) changes.everyone = argv.everyone;
-
-      // Percent: clear flag takes precedence
-      if ((argv as any).clearPercent) changes.percent = null;
-      else if (argv.percent !== undefined)
-        changes.percent = parsePercentOption(argv.percent);
-
-      // Roles: clear flag takes precedence
-      if ((argv as any).clearRoles) changes.roles = null;
-      else if (argv.roles !== undefined) changes.roles = argv.roles as string[];
-
-      // Groups: clear flag takes precedence
-      if ((argv as any).clearGroups) changes.groups = null;
-      else if (argv.groups !== undefined)
-        changes.groups = argv.groups as string[];
-
-      // Users: clear flag takes precedence
-      if ((argv as any).clearUsers) changes.users = null;
-      else if (argv.users !== undefined) changes.users = argv.users as string[];
-
-      // Tags: clear flag takes precedence
-      if ((argv as any).clearTags) changes.tags = null;
-      else if (argv.tags !== undefined) changes.tags = argv.tags as string[];
-
-      // Note: clear flag takes precedence
-      if ((argv as any).clearNote) changes.note = null;
-      else if (argv.note !== undefined) changes.note = argv.note;
-
-      // Expires: clear flag takes precedence
-      if ((argv as any).clearExpires) changes.expires = null;
-      else if (argv.expires !== undefined)
-        changes.expires = parseExpiresOption(argv.expires);
-
       const flag = await model.update(argv.id!, changes);
       if (flag) {
         console.log(JSON.stringify(flag, null, 2));
@@ -1218,29 +1232,32 @@ cli.command(
       });
   },
   async (argv) => {
+    // Validate and parse options before creating a database pool, so an
+    // invalid --percent/--expires is reported even when DATABASE_URL is
+    // missing (or the database is unreachable).
+    const changes: any = {};
+
+    if ((argv as any).clearEveryone) changes.everyone = null;
+    else if (argv.everyone !== undefined) changes.everyone = argv.everyone;
+
+    if ((argv as any).clearPercent) changes.percent = null;
+    else if (argv.percent !== undefined)
+      changes.percent = parsePercentOption(argv.percent);
+
+    if ((argv as any).clearRoles) changes.roles = null;
+    else if (argv.roles !== undefined) changes.roles = argv.roles as string[];
+
+    if ((argv as any).clearGroups) changes.groups = null;
+    else if (argv.groups !== undefined)
+      changes.groups = argv.groups as string[];
+
+    if ((argv as any).clearUsers) changes.users = null;
+    else if (argv.users !== undefined) changes.users = argv.users as string[];
+
     const db = createDatabase();
     const model = new FeatureFlagGroupModel(db);
 
     try {
-      const changes: any = {};
-
-      if ((argv as any).clearEveryone) changes.everyone = null;
-      else if (argv.everyone !== undefined) changes.everyone = argv.everyone;
-
-      if ((argv as any).clearPercent) changes.percent = null;
-      else if (argv.percent !== undefined)
-        changes.percent = parsePercentOption(argv.percent);
-
-      if ((argv as any).clearRoles) changes.roles = null;
-      else if (argv.roles !== undefined) changes.roles = argv.roles as string[];
-
-      if ((argv as any).clearGroups) changes.groups = null;
-      else if (argv.groups !== undefined)
-        changes.groups = argv.groups as string[];
-
-      if ((argv as any).clearUsers) changes.users = null;
-      else if (argv.users !== undefined) changes.users = argv.users as string[];
-
       const updatedCount = await model.updateAll(argv.groupId!, changes);
 
       console.log(
