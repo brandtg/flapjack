@@ -111,8 +111,8 @@ When checking if a feature flag is active for a user, Flapjack evaluates rules i
 
 1. **Everyone Override** (`everyone: true/false`): If set, immediately returns this value, ignoring all other rules
 2. **User List** (`users: [...]`): If the user ID is in this list, returns `true`
-3. **Group Membership** (`groups: [...]`): If the user belongs to any specified group, returns `true`
-4. **External Subject Match** (`subjects: [...]`): If any provided subject matches a direct flag subject or a flag-group subject, returns `true`
+3. **External Subject Match** (`subjects: [...]`): If any provided subject matches a direct flag subject or a flag-group subject, returns `true`
+4. **Group Membership** (`groups: [...]`): If the user belongs to any specified group, returns `true`
 5. **Role Membership** (`roles: [...]`): If the user has any specified role, returns `true`
 6. **Percentage Rollout** (`percent: 0-99.9`): Uses consistent hashing to deterministically bucket users (integer buckets 0-99; 99.9 passes every bucket — for an explicit 100% rollout use `everyone: true`)
 7. **Default**: Returns `false` if no conditions are met

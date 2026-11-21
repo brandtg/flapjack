@@ -650,10 +650,11 @@ export class FeatureFlagModel {
    * Evaluation order (first match wins):
    * 1. Everyone override (if set to true/false, returns immediately)
    * 2. User ID is in the users list
-   * 3. User belongs to any group in the groups list
-   * 4. User has any role in the roles list
-   * 5. User falls within the percentage rollout (based on consistent hashing)
-   * 6. Default: returns false
+   * 3. User has any subject in the subjects list (direct flag or flag-group match)
+   * 4. User belongs to any group in the groups list
+   * 5. User has any role in the roles list
+   * 6. User falls within the percentage rollout (based on consistent hashing)
+   * 7. Default: returns false
    *
    * @example
    * ```typescript
@@ -767,10 +768,11 @@ export class FeatureFlagModel {
    * Evaluation order for each flag (first match wins):
    * 1. Everyone override (if set to true/false, returns immediately)
    * 2. User ID is in the users list
-   * 3. User belongs to any group in the groups list
-   * 4. User has any role in the roles list
-   * 5. User falls within the percentage rollout (based on consistent hashing)
-   * 6. Default: returns false
+   * 3. User has any subject in the subjects list (direct flag or flag-group match)
+   * 4. User belongs to any group in the groups list
+   * 5. User has any role in the roles list
+   * 6. User falls within the percentage rollout (based on consistent hashing)
+   * 7. Default: returns false
    *
    * @example
    * ```typescript
