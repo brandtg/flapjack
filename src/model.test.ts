@@ -1922,6 +1922,34 @@ describe("FeatureFlagModel", () => {
       expect(fromUser).toBe(fromContext);
     });
 
+    it("should pass subjects through isActiveForUser", async () => {
+      const flag = await model.create({ name: "user-subjects-pass-through" });
+      await model.addSubject(flag.id, "tenant:for-user-api");
+
+      const enabled = await model.isActiveForUser({
+        name: "user-subjects-pass-through",
+        subjects: ["tenant:for-user-api"],
+      });
+
+      expect(enabled).toBe(true);
+    });
+
+    it("should pass subjects through areActiveForUser", async () => {
+      const on = await model.create({ name: "user-subjects-multi-on" });
+      await model.create({ name: "user-subjects-multi-off" });
+      await model.addSubject(on.id, "tenant:multi-user-api");
+
+      const results = await model.areActiveForUser({
+        names: ["user-subjects-multi-on", "user-subjects-multi-off"],
+        subjects: ["tenant:multi-user-api"],
+      });
+
+      expect(results).toEqual({
+        "user-subjects-multi-on": true,
+        "user-subjects-multi-off": false,
+      });
+    });
+
     it("should check multiple flags with subjects", async () => {
       const on = await model.create({ name: "context-multi-on" });
       await model.create({ name: "context-multi-off" });

@@ -453,8 +453,15 @@ describe("CLI smoke", () => {
     expect(isActiveContextRes.code).toBe(0);
     expect(JSON.parse(isActiveContextRes.stdout.trim()).isActive).toBe(true);
 
+    const isActiveRes = await runCli(
+      ["is-active", "cli-subject-flag", "--subjects", "tenant:acme"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(isActiveRes.code).toBe(0);
+    expect(JSON.parse(isActiveRes.stdout.trim()).isActive).toBe(true);
+
     const areActiveUserRes = await runCli(
-      ["are-active", "--names", "cli-subject-flag", "--roles", "admin"],
+      ["are-active", "--names", "cli-subject-flag", "--subjects", "tenant:acme"],
       { DATABASE_URL: TEST_DB_URL },
     );
     expect(areActiveUserRes.code).toBe(0);

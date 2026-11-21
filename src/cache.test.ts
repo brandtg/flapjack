@@ -214,6 +214,24 @@ describe("FeatureFlagCache", () => {
     expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(1);
   });
 
+  it("should forward subjects to the model via the User wrapper", async () => {
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(true);
+
+    await flagCache.isActiveForUser({
+      name: "test_flag",
+      user: "user1",
+      subjects: ["tenant:for-user-cache"],
+    } as any);
+
+    expect(mockModel.isActiveForContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "test_flag",
+        user: "user1",
+        subjects: ["tenant:for-user-cache"],
+      }),
+    );
+  });
+
   it("should generate different cache keys for different parameters", async () => {
     vi.mocked(mockModel.isActiveForContext).mockResolvedValue(true);
 

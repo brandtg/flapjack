@@ -644,6 +644,7 @@ export class FeatureFlagModel {
    * @param params.user - Optional user ID
    * @param params.roles - Optional list of roles the user has
    * @param params.groups - Optional list of groups the user belongs to
+   * @param params.subjects - Optional list of external subject IDs the user carries (direct flag or flag-group match)
    * @returns true if the flag is active for the user, false otherwise
    *
    * @remarks
@@ -678,17 +679,20 @@ export class FeatureFlagModel {
     user,
     roles,
     groups,
+    subjects,
   }: {
     name: string;
     user?: string;
     roles?: string[];
     groups?: string[];
+    subjects?: string[];
   }): Promise<boolean> {
     return this.isActiveForContext({
       name,
       user,
       roles,
       groups,
+      subjects,
     });
   }
 
@@ -759,6 +763,7 @@ export class FeatureFlagModel {
    * @param params.user - Optional user ID
    * @param params.roles - Optional list of roles the user has
    * @param params.groups - Optional list of groups the user belongs to
+   * @param params.subjects - Optional list of external subject IDs the user carries (direct flag or flag-group match)
    * @returns Record mapping flag names to their active status (true/false)
    *
    * @remarks
@@ -804,17 +809,20 @@ export class FeatureFlagModel {
     user,
     roles,
     groups,
+    subjects,
   }: {
     names?: string[];
     user?: string;
     roles?: string[];
     groups?: string[];
+    subjects?: string[];
   }): Promise<Record<string, boolean>> {
     return this.areActiveForContext({
       names,
       user,
       roles,
       groups,
+      subjects,
     });
   }
 

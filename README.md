@@ -412,7 +412,7 @@ Archiving is **irreversible** (there is no `unarchive`) and the `archived` times
 
 #### `isActiveForUser(params): Promise<boolean>`
 
-Checks if a feature flag is active for a user based on the evaluation rules.
+Checks if a feature flag is active for a user based on the evaluation rules. Accepts the same `subjects` parameter as `isActiveForContext` (external subjects) and forwards it.
 
 #### `hashUserId(userId: string): Promise<number>`
 
@@ -447,6 +447,10 @@ flapjack is-active my_feature --user user123 --roles admin
 
 # Check if multiple flags are active for a user
 flapjack are-active --names my_feature other_feature --user user123 --roles admin
+
+# Pass external subjects to the User commands (same as is-active-context/are-active-context)
+flapjack is-active my_feature --subjects tenant:acme
+flapjack are-active --names my_feature other_feature --subjects tenant:acme
 
 # Check if active for context (with external subject IDs)
 flapjack is-active-context my_feature --user user123 --subjects tenant:acme

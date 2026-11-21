@@ -196,17 +196,20 @@ export class FeatureFlagCache {
     user,
     roles,
     groups,
+    subjects,
   }: {
     name: string;
     user?: string;
     roles?: string[];
     groups?: string[];
+    subjects?: string[];
   }): Promise<boolean> {
     return this.isActiveForContext({
       name,
       user,
       roles,
       groups,
+      subjects,
     });
   }
 

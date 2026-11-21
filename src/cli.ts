@@ -432,6 +432,10 @@ cli.command(
           type: "array",
           describe: "User groups",
         },
+        subjects: {
+          type: "array",
+          describe: "External subject IDs (for example tenant:acme)",
+        },
       });
   },
   async (argv) => {
@@ -444,6 +448,7 @@ cli.command(
         user: argv.user,
         roles: argv.roles as string[],
         groups: argv.groups as string[],
+        subjects: argv.subjects as string[],
       });
 
       console.log(
@@ -454,6 +459,7 @@ cli.command(
             user: argv.user,
             roles: argv.roles,
             groups: argv.groups,
+            subjects: argv.subjects,
           },
           null,
           2,
@@ -490,6 +496,10 @@ cli.command(
         type: "array",
         describe: "User groups",
       },
+      subjects: {
+        type: "array",
+        describe: "External subject IDs (for example tenant:acme)",
+      },
     });
   },
   async (argv) => {
@@ -502,6 +512,7 @@ cli.command(
         user: argv.user,
         roles: argv.roles as string[],
         groups: argv.groups as string[],
+        subjects: argv.subjects as string[],
       });
 
       console.log(
@@ -511,6 +522,7 @@ cli.command(
             user: argv.user,
             roles: argv.roles,
             groups: argv.groups,
+            subjects: argv.subjects,
             results,
           },
           null,
