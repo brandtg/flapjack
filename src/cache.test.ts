@@ -253,6 +253,39 @@ describe("FeatureFlagCache", () => {
     expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(8);
   });
 
+  it("should not reorder caller arrays when generating the cache key", async () => {
+    vi.mocked(mockModel.isActiveForContext).mockResolvedValue(true);
+
+    const roles = ["b", "a", "c"];
+    const groups = ["beta", "alpha"];
+    const subjects = ["z", "x"];
+
+    await flagCache.isActiveForContext({
+      name: "test_flag",
+      user: "user1",
+      roles,
+      groups,
+      subjects,
+    } as any);
+
+    // Caller arrays must be untouched — sort() used to mutate them in place
+    expect(roles).toEqual(["b", "a", "c"]);
+    expect(groups).toEqual(["beta", "alpha"]);
+    expect(subjects).toEqual(["z", "x"]);
+
+    // The cache key is still order-insensitive
+    await flagCache.isActiveForContext({
+      name: "test_flag",
+      user: "user1",
+      roles: ["c", "a", "b"],
+      groups: ["alpha", "beta"],
+      subjects: ["x", "z"],
+    } as any);
+
+    // Second call with the same parameters in different order hits the cache
+    expect(mockModel.isActiveForContext).toHaveBeenCalledTimes(1);
+  });
+
   it("should generate same cache key for same parameters regardless of order", async () => {
     vi.mocked(mockModel.isActiveForContext).mockResolvedValue(true);
 

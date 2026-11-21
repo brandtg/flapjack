@@ -180,9 +180,9 @@ export class FeatureFlagCache {
     const keyParts = [
       name,
       user || "",
-      (roles || []).sort().join(","),
-      (groups || []).sort().join(","),
-      (subjects || []).sort().join(","),
+      [...(roles || [])].sort().join(","),
+      [...(groups || [])].sort().join(","),
+      [...(subjects || [])].sort().join(","),
     ];
     const keyString = keyParts.join("|");
 
