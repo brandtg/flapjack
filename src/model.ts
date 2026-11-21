@@ -714,17 +714,16 @@ export class FeatureFlagModel {
       return false;
     }
 
-    // If the flag has expired, trigger event and return false
-    if (
-      this.eventHandlers?.onExpired &&
-      flag &&
-      flag.expires &&
-      flag.expires <= new Date()
-    ) {
-      const expiredResult = await this.eventHandlers.onExpired({ flag });
-      if (expiredResult !== undefined) {
-        return expiredResult;
+    // Expired flag: trigger onExpired (if set); if the handler returns a
+    // boolean, use it. Otherwise the flag is inactive regardless of normal rules.
+    if (flag.expires && flag.expires <= new Date()) {
+      if (this.eventHandlers?.onExpired) {
+        const expiredResult = await this.eventHandlers.onExpired({ flag });
+        if (expiredResult !== undefined) {
+          return expiredResult;
+        }
       }
+      return false;
     }
 
     const subjectMatchedFlagIds = await this.getSubjectMatchedFlagIds(subjects);
@@ -844,17 +843,18 @@ export class FeatureFlagModel {
         continue;
       }
 
-      // If the flag has expired, trigger event
-      if (
-        this.eventHandlers?.onExpired &&
-        flag.expires &&
-        flag.expires <= new Date()
-      ) {
-        const expiredResult = await this.eventHandlers.onExpired({ flag });
-        if (expiredResult !== undefined) {
-          result[name] = expiredResult;
-          continue;
+      // Expired flag: trigger onExpired (if set); if the handler returns a
+      // boolean, use it. Otherwise the flag is inactive regardless of normal rules.
+      if (flag.expires && flag.expires <= new Date()) {
+        if (this.eventHandlers?.onExpired) {
+          const expiredResult = await this.eventHandlers.onExpired({ flag });
+          if (expiredResult !== undefined) {
+            result[name] = expiredResult;
+            continue;
+          }
         }
+        result[name] = false;
+        continue;
       }
 
       result[name] = await this.evaluateFlagForUser(flag, {

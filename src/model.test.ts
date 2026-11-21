@@ -1119,8 +1119,45 @@ describe("FeatureFlagModel", () => {
         user: "user123",
       });
 
-      // Default behavior: expired flags are not active
-      expect(isActive).toBe(true); // Should continue with normal evaluation
+      // Strict default: expired flags are inactive regardless of everyone override
+      expect(isActive).toBe(false);
+    });
+
+    it("should return false for expired flag with role match when no handler is set", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 2);
+
+      await model.create({
+        name: "expired-role-flag-no-handler",
+        roles: ["admin"],
+        expires: pastDate,
+      });
+
+      const isActive = await model.isActiveForUser({
+        name: "expired-role-flag-no-handler",
+        user: "user123",
+        roles: ["admin"],
+      });
+
+      expect(isActive).toBe(false);
+    });
+
+    it("should return false for expired flag in areActiveForUser when no handler is set", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 2);
+
+      await model.create({
+        name: "multi-expired-no-handler",
+        everyone: true,
+        expires: pastDate,
+      });
+
+      const results = await model.areActiveForUser({
+        names: ["multi-expired-no-handler"],
+        user: "user123",
+      });
+
+      expect(results).toEqual({ "multi-expired-no-handler": false });
     });
 
     it("should keep everyone false as highest precedence over subjects", async () => {
@@ -1252,8 +1289,8 @@ describe("FeatureFlagModel", () => {
           expires: expect.any(Date),
         }),
       });
-      // Handler returned undefined, so normal evaluation continues
-      expect(isActive).toBe(true);
+      // Handler returned undefined, so the flag is treated as inactive
+      expect(isActive).toBe(false);
     });
 
     it("should not call onExpired handler for non-expired flags", async () => {
@@ -1352,7 +1389,7 @@ describe("FeatureFlagModel", () => {
       expect(isActive).toBe(true); // Handler override
     });
 
-    it("should continue normal evaluation when handler returns undefined", async () => {
+    it("should treat expired flag as inactive when handler returns undefined", async () => {
       const pastDate = new Date();
       pastDate.setDate(pastDate.getDate() - 1); // Yesterday
 
@@ -1381,8 +1418,8 @@ describe("FeatureFlagModel", () => {
       });
 
       expect(onExpiredMock).toHaveBeenCalledTimes(2);
-      expect(isActiveForAdmin).toBe(true); // Matches role
-      expect(isActiveForUser).toBe(false); // Doesn't match role
+      expect(isActiveForAdmin).toBe(false); // Roles do not rescue an expired flag
+      expect(isActiveForUser).toBe(false);
     });
 
     it("should use handler result for expired flag with percentage rollout", async () => {
@@ -1407,8 +1444,8 @@ describe("FeatureFlagModel", () => {
       });
 
       expect(onExpiredMock).toHaveBeenCalledTimes(1);
-      // Handler returned undefined, so percentage rollout is evaluated
-      expect(typeof isActive).toBe("boolean");
+      // Handler returned undefined, so the expired flag is inactive
+      expect(isActive).toBe(false);
     });
 
     it("should handle expiration check at exact expiration time", async () => {
@@ -1468,7 +1505,7 @@ describe("FeatureFlagModel", () => {
       expect(metricsEmitted).toEqual([
         "expired_flag_used:expired-metrics-test",
       ]);
-      expect(isActive).toBe(true); // User is in the users list
+      expect(isActive).toBe(false); // Expired flag is inactive despite user match
     });
 
     it("should work correctly with multiple expired flags", async () => {
@@ -1510,7 +1547,7 @@ describe("FeatureFlagModel", () => {
       expect(onExpiredMock).toHaveBeenCalledTimes(2);
       expect(callLog).toEqual(["expired-flag-1", "expired-flag-2"]);
       expect(isActive1).toBe(false); // Handler returned false
-      expect(isActive2).toBe(true); // Handler returned undefined, everyone is true
+      expect(isActive2).toBe(false); // Handler returned undefined, expired flag is inactive
     });
   });
 
@@ -1690,7 +1727,7 @@ describe("FeatureFlagModel", () => {
       expect(onExpiredMock).toHaveBeenCalledTimes(2);
       expect(results).toEqual({
         "multi-expired-override": true, // Handler override
-        "multi-expired-continue": true, // Handler undefined, role matches
+        "multi-expired-continue": false, // Handler undefined, expired flag is inactive
       });
     });
 
@@ -1821,7 +1858,7 @@ describe("FeatureFlagModel", () => {
 
       // Verify the results for our specific flags
       expect(results["all-expired-override"]).toBe(true); // Handler override
-      expect(results["all-expired-continue"]).toBe(true); // Handler undefined, role matches
+      expect(results["all-expired-continue"]).toBe(false); // Handler undefined, expired flag is inactive
       expect(results["all-not-expired"]).toBe(true); // Not expired, everyone true
     });
 

@@ -41,9 +41,9 @@ export type FeatureFlag = {
  * Called when a feature flag which has expired is used.
  *
  * If the handler returns `true` or `false`, that value will be used as the result of the feature
- * flag check. If it returns `undefined` the behavior will be the same as if the flag has not
- * expired. This can be used to implement a grace period for expired flags, or to emit metrics to
- * alert that an expired flag is still in use.
+ * flag check. If it returns `undefined` the flag is treated as inactive (the same as if no
+ * handler were set). This can be used to implement a grace period for expired flags, or to emit
+ * metrics to alert that an expired flag is still in use.
  */
 export type ExpiredFeatureFlagEventHandler = ({
   flag,
