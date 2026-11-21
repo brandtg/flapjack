@@ -225,6 +225,7 @@ import {
   FeatureFlagModel,
   FeatureFlagCache,
   InMemoryCache,
+  type CachedFlagResult,
 } from "@brandtg/flapjack";
 
 // Set up the database model
@@ -233,7 +234,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // Create cached feature flags instance
 const featureFlags = new FeatureFlagCache({
   model: new FeatureFlagModel(pool),
-  cache: new InMemoryCache<boolean>(),
+  cache: new InMemoryCache<CachedFlagResult>(), // result + expiry only
   ttl: 300, // Set TTL to 5 minutes (300 seconds)
 });
 
@@ -270,21 +271,21 @@ await featureFlags.isActiveForUser({
 You can implement your own cache (Redis, Memcached, etc.) by implementing the `Cache` interface:
 
 ```typescript
-import type { Cache } from "@brandtg/flapjack";
+import type { Cache, CachedFlagResult } from "@brandtg/flapjack";
 
-class RedisCache implements Cache {
+class RedisCache implements Cache<CachedFlagResult> {
   private redis: RedisClient;
 
   constructor(redis: RedisClient) {
     this.redis = redis;
   }
 
-  get(key: string): any {
+  get(key: string): Promise<CachedFlagResult | undefined> {
     const value = this.redis.get(key);
     return value ? JSON.parse(value) : undefined;
   }
 
-  set(key: string, value: any, ttl?: number): void {
+  set(key: string, value: CachedFlagResult, ttl?: number): Promise<void> {
     const serialized = JSON.stringify(value);
     if (ttl) {
       this.redis.setex(key, ttl, serialized);
@@ -293,7 +294,7 @@ class RedisCache implements Cache {
     }
   }
 
-  delete(key: string): void {
+  delete(key: string): Promise<void> {
     this.redis.del(key);
   }
 }
@@ -305,6 +306,8 @@ const featureFlags = new FeatureFlagCache({
   ttl: 300,
 });
 ```
+
+> **Note on cache entries:** a cached entry stores the boolean result **and** the flag's expiry (epoch milliseconds) — not the whole flag. On a cache hit, if the stored expiry says the flag may be expired, the cache layer fetches the flag fresh and fires `onExpired` with it — so side effects like usage metrics keep firing for expired flags without a database round trip on the non-expired path. A flag modified within the TTL keeps serving its cached result until the TTL expires.
 
 ### Database Connection Pooling
 

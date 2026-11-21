@@ -7,6 +7,18 @@ export interface Cache<T> {
   delete(key: string): Promise<void>;
 }
 
+/**
+ * Shape of a cached evaluation: the boolean the model returned plus the flag's
+ * expiry at the time of the miss (epoch milliseconds, JSON-safe). Only the
+ * expiry is stored — not the whole flag — so entries stay small. On a cache
+ * hit, if the stored expiry says the flag may be expired, the cache layer
+ * fetches the flag fresh and fires `onExpired` with it.
+ */
+export interface CachedFlagResult {
+  result: boolean;
+  flagExpires: number | null;
+}
+
 interface CacheEntry<T> {
   value: T;
   expiresAt?: number;
@@ -74,7 +86,7 @@ export class InMemoryCache<T> implements Cache<T> {
 
 export class FeatureFlagCache {
   private model: FeatureFlagModel;
-  private cache: Cache<boolean>;
+  private cache: Cache<CachedFlagResult>;
   private ttl: number;
 
   constructor({
@@ -83,7 +95,7 @@ export class FeatureFlagCache {
     ttl = DEFAULT_TTL,
   }: {
     model: FeatureFlagModel;
-    cache: Cache<boolean>;
+    cache: Cache<CachedFlagResult>;
     ttl?: number;
   }) {
     this.model = model;
@@ -164,9 +176,29 @@ export class FeatureFlagCache {
     });
 
     // Try to get from cache first
-    const cachedResult = await this.cache.get(cacheKey);
-    if (cachedResult !== undefined) {
-      return cachedResult;
+    const rawEntry = await this.cache.get(cacheKey);
+    if (rawEntry !== undefined) {
+      // Legacy entries written by the previous version are bare booleans;
+      // accept them so an existing deploy cache keeps working without a nuke.
+      const entry: CachedFlagResult =
+        typeof rawEntry === "boolean"
+          ? { result: rawEntry, flagExpires: null }
+          : (rawEntry as CachedFlagResult);
+
+      // Re-fire onExpired on every evaluation (including cache hits) so
+      // metrics/alerts keep firing for expired-flag usage. Only fetch the flag
+      // if the stored expiry suggests it may be expired; the fresh flag is then
+      // handed to the shared model helper, which no-ops for non-expired flags.
+      // Legacy (boolean) entries carry no expiry, so nothing is fetched — the
+      // original cache miss already fired the handler for those.
+      // The cached result stands — the handler's return value is ignored here.
+      if (entry.flagExpires !== null && entry.flagExpires <= Date.now()) {
+        const flag = await this.model.getByName(name);
+        if (flag) {
+          await this.model.fireExpiredHandler(flag);
+        }
+      }
+      return entry.result;
     }
 
     // Cache miss, get from model
@@ -178,8 +210,14 @@ export class FeatureFlagCache {
       subjects,
     });
 
-    // Store in cache with TTL
-    this.cache.set(cacheKey, result, this.ttl);
+    // Store the result and the flag's expiry (one extra indexed read on the
+    // miss path) so cache hits can cheaply check whether the flag may be expired
+    const flag = await this.model.getByName(name);
+    await this.cache.set(
+      cacheKey,
+      { result, flagExpires: flag?.expires?.getTime() ?? null },
+      this.ttl,
+    );
 
     return result;
   }

@@ -692,6 +692,22 @@ export class FeatureFlagModel {
   }
 
   /**
+   * Fires the `onExpired` handler for a flag that has expired.
+   *
+   * Returns the handler's boolean result if it provided one; otherwise returns
+   * `undefined` (meaning "no override" — the caller should treat the flag as
+   * inactive). Does nothing for non-expired flags or when no handler is set.
+   *
+   * Exported so the cache layer can fire the same handler on every evaluation
+   * (including cache hits) instead of only on cache misses.
+   */
+  async fireExpiredHandler(flag: FeatureFlag): Promise<boolean | undefined> {
+    if (!flag.expires || flag.expires > new Date()) return undefined;
+    if (!this.eventHandlers?.onExpired) return undefined;
+    return this.eventHandlers.onExpired({ flag });
+  }
+
+  /**
    * Checks if a feature flag is active for a context, including optional external subjects.
    */
   async isActiveForContext({
@@ -716,13 +732,11 @@ export class FeatureFlagModel {
 
     // Expired flag: trigger onExpired (if set); if the handler returns a
     // boolean, use it. Otherwise the flag is inactive regardless of normal rules.
+    const expiredOverride = await this.fireExpiredHandler(flag);
+    if (expiredOverride !== undefined) {
+      return expiredOverride;
+    }
     if (flag.expires && flag.expires <= new Date()) {
-      if (this.eventHandlers?.onExpired) {
-        const expiredResult = await this.eventHandlers.onExpired({ flag });
-        if (expiredResult !== undefined) {
-          return expiredResult;
-        }
-      }
       return false;
     }
 
@@ -845,14 +859,12 @@ export class FeatureFlagModel {
 
       // Expired flag: trigger onExpired (if set); if the handler returns a
       // boolean, use it. Otherwise the flag is inactive regardless of normal rules.
+      const expiredOverride = await this.fireExpiredHandler(flag);
+      if (expiredOverride !== undefined) {
+        result[name] = expiredOverride;
+        continue;
+      }
       if (flag.expires && flag.expires <= new Date()) {
-        if (this.eventHandlers?.onExpired) {
-          const expiredResult = await this.eventHandlers.onExpired({ flag });
-          if (expiredResult !== undefined) {
-            result[name] = expiredResult;
-            continue;
-          }
-        }
         result[name] = false;
         continue;
       }
