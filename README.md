@@ -753,16 +753,17 @@ Install dependencies
 npm install
 ```
 
-Create an environment file:
+Create an environment file (the script writes `DATABASE_URL=postgres://flapjack:flapjack@localhost:5477/flapjack_dev` to `.env` — or copy the committed `.env.example` yourself):
 
 ```bash
 npm run dev:env
 ```
 
-Start the PostgreSQL database:
+Start the PostgreSQL database. The dev stack publishes host port `5477` by default; override with `FLAPJACK_PORT` if 5477 is taken:
 
 ```bash
 npm run dev:docker:up
+# or: FLAPJACK_PORT=5540 npm run dev:docker:up
 ```
 
 Run database migrations:
@@ -776,6 +777,8 @@ npm run dev:migrate
 ```bash
 npm run test
 ```
+
+The test suite drops and recreates `flapjack_test` / `flapjack_cli_test` databases, so it never reads `DATABASE_URL`. It connects to the dev DB at `localhost:${FLAPJACK_TEST_PORT:-5477}` (the same port `docker-compose.yml` publishes). If you run the stack on a non-default port, set `FLAPJACK_TEST_PORT` accordingly — e.g. `FLAPJACK_TEST_PORT=5540 npm test`.
 
 ### Database Management
 

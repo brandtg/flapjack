@@ -2,7 +2,7 @@ services:
   db:
     image: postgres:17-alpine
     ports:
-      - "5477:5432"
+      - "${FLAPJACK_PORT:-5477}:5432"
     environment:
       - POSTGRES_USER=flapjack
       - POSTGRES_PASSWORD=flapjack

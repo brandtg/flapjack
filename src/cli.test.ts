@@ -7,11 +7,14 @@ import { runMigrations } from "./migrate.js";
 
 const execFileAsync = promisify(execFile);
 
+// Tests connect to the dev DB on FLAPJACK_TEST_PORT (default 5477, the port
+// docker-compose publishes). Tests drop and recreate flapjack_cli_test, so they
+// must never point at a real database — DATABASE_URL is deliberately NOT read.
 const DB_CONFIG = {
   user: "flapjack",
   password: "flapjack",
   host: "localhost",
-  port: 5477,
+  port: Number(process.env.FLAPJACK_TEST_PORT) || 5477,
 };
 
 const TEST_DB_NAME = "flapjack_cli_test";
