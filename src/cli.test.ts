@@ -7,11 +7,14 @@ import { runMigrations } from "./migrate.js";
 
 const execFileAsync = promisify(execFile);
 
+// Tests connect to the dev DB on FLAPJACK_TEST_PORT (default 5477, the port
+// docker-compose publishes). Tests drop and recreate flapjack_cli_test, so they
+// must never point at a real database — DATABASE_URL is deliberately NOT read.
 const DB_CONFIG = {
   user: "flapjack",
   password: "flapjack",
   host: "localhost",
-  port: 5432,
+  port: Number(process.env.FLAPJACK_TEST_PORT) || 5477,
 };
 
 const TEST_DB_NAME = "flapjack_cli_test";
@@ -43,7 +46,9 @@ describe("CLI smoke", () => {
   beforeAll(async () => {
     const setupPool = new Pool({ ...DB_CONFIG, database: "postgres" });
     try {
-      await setupPool.query(`DROP DATABASE IF EXISTS ${TEST_DB_NAME}`);
+      await setupPool.query(
+        `DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`,
+      );
       await setupPool.query(`CREATE DATABASE ${TEST_DB_NAME}`);
     } finally {
       await setupPool.end();
@@ -60,10 +65,23 @@ describe("CLI smoke", () => {
     await adminPool.end();
     const cleanupPool = new Pool({ ...DB_CONFIG, database: "postgres" });
     try {
-      await cleanupPool.query(`DROP DATABASE IF EXISTS ${TEST_DB_NAME}`);
+      await cleanupPool.query(
+        `DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`,
+      );
     } finally {
       await cleanupPool.end();
     }
+  });
+
+  it("hash-user works with no database", async () => {
+    const res = await runCli(["hash-user", "no-db-user"], {
+      DATABASE_URL: "",
+    });
+    expect(res.code).toBe(0);
+    const payload = JSON.parse(res.stdout.trim());
+    expect(payload.userId).toBe("no-db-user");
+    expect(typeof payload.hash).toBe("number");
+    expect(payload.bucket).toBe(payload.hash % 100);
   });
 
   it("prints help", async () => {
@@ -71,6 +89,116 @@ describe("CLI smoke", () => {
     expect(res.code).toBe(0);
     expect(res.stdout).toContain("Commands:");
     expect(res.stdout).toContain("flapjack create");
+  });
+
+  it("prints a usage hint on usage errors (unknown flag)", async () => {
+    const res = await runCli(["get", "1", "--bogus-flag"], {
+      DATABASE_URL: TEST_DB_URL,
+    });
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--help");
+    expect(res.stderr).toContain("Unknown argument");
+  });
+
+  it("prints a usage hint on usage errors (missing command)", async () => {
+    const res = await runCli([], { DATABASE_URL: TEST_DB_URL });
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--help");
+    expect(res.stderr).toContain("You need to specify a command");
+  });
+
+  it("prints a clean one-line error for handler errors (no usage hint)", async () => {
+    const res = await runCli(["get", "999999"], { DATABASE_URL: TEST_DB_URL });
+    expect(res.code).toBe(1);
+    expect(res.stderr).not.toContain("--help");
+    expect(res.stdout).toContain("not found");
+  });
+
+  it("rejects an invalid --percent before requiring a database connection", async () => {
+    const res = await runCli(
+      ["create", "--name", "cli-no-env", "--percent", "100"],
+      { DATABASE_URL: "" },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--percent");
+    expect(res.stderr).not.toContain("DATABASE_URL is not set");
+  });
+
+  it("rejects an invalid --expires before requiring a database connection", async () => {
+    const res = await runCli(["update", "1", "--expires", "not-a-date"], {
+      DATABASE_URL: "",
+    });
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--expires");
+    expect(res.stderr).not.toContain("DATABASE_URL is not set");
+  });
+
+  it("create rejects an invalid --percent", async () => {
+    const res = await runCli(
+      ["create", "--name", "cli-bad-percent", "--percent", "100"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--percent");
+  });
+
+  it("create rejects an invalid --expires", async () => {
+    const res = await runCli(
+      ["create", "--name", "cli-bad-expires", "--expires", "not-a-date"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--expires");
+  });
+
+  it("update rejects an invalid --percent", async () => {
+    // create a flag first
+    const createRes = await runCli(
+      ["create", "--name", "cli-update-bad-percent"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(createRes.code).toBe(0);
+    const created = JSON.parse(createRes.stdout.trim());
+
+    const res = await runCli(
+      ["update", String(created.id), "--percent", "101"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--percent");
+  });
+
+  it("update rejects an invalid --expires", async () => {
+    const createRes = await runCli(
+      ["create", "--name", "cli-update-bad-expires"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(createRes.code).toBe(0);
+    const created = JSON.parse(createRes.stdout.trim());
+
+    const res = await runCli(
+      ["update", String(created.id), "--expires", "not-a-date"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--expires");
+  });
+
+  it("group-update-all rejects an invalid --percent", async () => {
+    // create a group and flag
+    const groupRes = await runCli(
+      ["group-create", "--name", "cli-bad-percent-group"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(groupRes.code).toBe(0);
+    const group = JSON.parse(groupRes.stdout.trim());
+
+    const res = await runCli(
+      ["group-update-all", String(group.id), "--percent", "999"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("--percent");
   });
 
   it("create/get/is-active/update/delete works", async () => {
@@ -449,8 +577,21 @@ describe("CLI smoke", () => {
     expect(isActiveContextRes.code).toBe(0);
     expect(JSON.parse(isActiveContextRes.stdout.trim()).isActive).toBe(true);
 
+    const isActiveRes = await runCli(
+      ["is-active", "cli-subject-flag", "--subjects", "tenant:acme"],
+      { DATABASE_URL: TEST_DB_URL },
+    );
+    expect(isActiveRes.code).toBe(0);
+    expect(JSON.parse(isActiveRes.stdout.trim()).isActive).toBe(true);
+
     const areActiveUserRes = await runCli(
-      ["are-active", "--names", "cli-subject-flag", "--roles", "admin"],
+      [
+        "are-active",
+        "--names",
+        "cli-subject-flag",
+        "--subjects",
+        "tenant:acme",
+      ],
       { DATABASE_URL: TEST_DB_URL },
     );
     expect(areActiveUserRes.code).toBe(0);

@@ -1,13 +1,21 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { Pool } from "pg";
-import { FeatureFlagModel, FeatureFlagGroupModel } from "./model.js";
+import {
+  FeatureFlagModel,
+  FeatureFlagGroupModel,
+  hashUserId,
+  InvalidFlagInputError,
+} from "./model.js";
 import { runMigrations } from "./migrate.js";
 
+// Tests connect to the dev DB on FLAPJACK_TEST_PORT (default 5477, the port
+// docker-compose publishes). Tests drop and recreate flapjack_test, so they
+// must never point at a real database — DATABASE_URL is deliberately NOT read.
 const DB_CONFIG = {
   user: "flapjack",
   password: "flapjack",
   host: "localhost",
-  port: 5432,
+  port: Number(process.env.FLAPJACK_TEST_PORT) || 5477,
 };
 
 const TEST_DB_NAME = "flapjack_test";
@@ -25,7 +33,9 @@ describe("FeatureFlagModel", () => {
 
     try {
       // Drop test database if it exists and create a fresh one
-      await setupPool.query(`DROP DATABASE IF EXISTS ${TEST_DB_NAME}`);
+      await setupPool.query(
+        `DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`,
+      );
       await setupPool.query(`CREATE DATABASE ${TEST_DB_NAME}`);
     } finally {
       await setupPool.end();
@@ -55,7 +65,9 @@ describe("FeatureFlagModel", () => {
     });
 
     try {
-      await cleanupPool.query(`DROP DATABASE IF EXISTS ${TEST_DB_NAME}`);
+      await cleanupPool.query(
+        `DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`,
+      );
     } finally {
       await cleanupPool.end();
     }
@@ -132,6 +144,55 @@ describe("FeatureFlagModel", () => {
 
       expect(flag.expires).toBeInstanceOf(Date);
       expect(flag.expires?.toISOString()).toBe(expiresDate.toISOString());
+    });
+
+    it("should reject an empty name", async () => {
+      await expect(model.create({ name: "" })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
+      await expect(model.create({ name: "   " })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
+    });
+
+    it("should reject an out-of-range percent", async () => {
+      await expect(
+        model.create({ name: "bad-percent", percent: 100 }),
+      ).rejects.toThrow(InvalidFlagInputError);
+      await expect(
+        model.create({ name: "bad-percent", percent: -1 }),
+      ).rejects.toThrow(InvalidFlagInputError);
+      await expect(
+        model.create({ name: "bad-percent", percent: 100 }),
+      ).rejects.toThrow(/percent/);
+    });
+
+    it("should reject an invalid expires date", async () => {
+      await expect(
+        model.create({ name: "bad-expires", expires: new Date("not-a-date") }),
+      ).rejects.toThrow(InvalidFlagInputError);
+    });
+
+    it("should treat an explicit undefined optional field as not set", async () => {
+      const flag = await model.create({
+        name: "create-undefined-skip",
+        percent: undefined as any,
+        note: undefined as any,
+        expires: undefined as any,
+      });
+
+      expect(flag.percent).toBeUndefined();
+      expect(flag.note).toBeUndefined();
+      expect(flag.expires).toBeUndefined();
+    });
+
+    it("should treat an explicit null optional field as clear (omitted on create)", async () => {
+      const flag = await model.create({
+        name: "create-null-note",
+        note: null as any,
+      });
+
+      expect(flag.note).toBeUndefined();
     });
   });
 
@@ -515,6 +576,33 @@ describe("FeatureFlagModel", () => {
       expect(updated!.expires?.toISOString()).toBe(expiresDate.toISOString());
     });
 
+    it("should reject an empty name", async () => {
+      const created = await model.create({ name: "test-update-empty-name" });
+      await expect(model.update(created.id, { name: "" })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
+      await expect(model.update(created.id, { name: "   " })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
+    });
+
+    it("should reject an out-of-range percent", async () => {
+      const created = await model.create({ name: "test-update-bad-percent" });
+      await expect(model.update(created.id, { percent: 100 })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
+      await expect(model.update(created.id, { percent: -1 })).rejects.toThrow(
+        InvalidFlagInputError,
+      );
+    });
+
+    it("should reject an invalid expires date", async () => {
+      const created = await model.create({ name: "test-update-bad-expires" });
+      await expect(
+        model.update(created.id, { expires: new Date("not-a-date") }),
+      ).rejects.toThrow(InvalidFlagInputError);
+    });
+
     it("should set and bump tags on a feature flag", async () => {
       const created = await model.create({ name: "test-update-tags" });
       expect(created.tags).toBeUndefined();
@@ -544,6 +632,56 @@ describe("FeatureFlagModel", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.tags).toBeUndefined();
+    });
+
+    it("should treat an explicit undefined optional field as not set", async () => {
+      const created = await model.create({
+        name: "test-update-undefined-skip",
+        percent: 42,
+        note: "keep me",
+      });
+
+      const updated = await model.update(created.id, {
+        percent: undefined as any,
+        note: undefined as any,
+        expires: undefined as any,
+      });
+
+      expect(updated).not.toBeNull();
+      // Explicit undefined must NOT clear — the previous values stay
+      expect(updated!.percent).toBe(42);
+      expect(updated!.note).toBe("keep me");
+      expect(updated!.expires).toBeUndefined();
+    });
+
+    it("should treat an explicit null optional field as clear", async () => {
+      const created = await model.create({
+        name: "test-update-null-clear",
+        percent: 42,
+        note: "keep me",
+      });
+
+      const updated = await model.update(created.id, {
+        percent: null as any,
+        note: null as any,
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.percent).toBeUndefined();
+      expect(updated!.note).toBeUndefined();
+    });
+
+    it("should not reject an explicit undefined name", async () => {
+      const created = await model.create({
+        name: "test-update-undefined-name",
+      });
+
+      const updated = await model.update(created.id, {
+        name: undefined as any,
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.name).toBe("test-update-undefined-name");
     });
   });
 
@@ -633,6 +771,17 @@ describe("FeatureFlagModel", () => {
     });
   });
 
+  describe("hashUserId pure helper", () => {
+    it("should return the same hash as the model method", async () => {
+      const modelHash = await model.hashUserId("helper-check");
+      expect(hashUserId("helper-check")).toBe(modelHash);
+    });
+
+    it("should not require a database", () => {
+      expect(typeof hashUserId("no-db")).toBe("number");
+    });
+  });
+
   describe("hashUserId", () => {
     it("should return consistent hash for same user id", async () => {
       const hash1 = await model.hashUserId("user123");
@@ -647,6 +796,89 @@ describe("FeatureFlagModel", () => {
       const hash2 = await model.hashUserId("user456");
 
       expect(hash1).not.toBe(hash2);
+    });
+  });
+
+  describe("percentage rollout bounds", () => {
+    it("should treat percent 0 as no rollout for every user", async () => {
+      await model.create({ name: "percent-zero-flag", percent: 0 });
+      for (const user of ["user-a", "user-b", "user-c", "user-d"]) {
+        const active = await model.isActiveForUser({
+          name: "percent-zero-flag",
+          user,
+        });
+        expect(active).toBe(false);
+      }
+    });
+
+    it("should pass every user for percent 99.9", async () => {
+      await model.create({ name: "percent-999-flag", percent: 99.9 });
+      for (const user of [
+        "user-a",
+        "user-b",
+        "user-c",
+        "user-d",
+        "user-e",
+        "user-f",
+        "user-g",
+        "user-h",
+        "user-i",
+        "user-j",
+      ]) {
+        const active = await model.isActiveForUser({
+          name: "percent-999-flag",
+          user,
+        });
+        expect(active).toBe(true);
+      }
+    });
+
+    it("should evaluate the 0.1 boundary (only bucket 0 passes)", async () => {
+      await model.create({ name: "percent-01-flag", percent: 0.1 });
+      for (let i = 0; i < 100; i++) {
+        const user = `boundary-user-${i}`;
+        const hash = await model.hashUserId(user);
+        const bucket = hash % 100;
+        const active = await model.isActiveForUser({
+          name: "percent-01-flag",
+          user,
+        });
+        // bucket 0 (< 0.1) passes; only bucket 0 passes
+        expect(active).toBe(bucket < 0.1);
+      }
+    });
+
+    it("should treat percent 50 as a strict bucket cutoff", async () => {
+      await model.create({ name: "percent-fifty-flag", percent: 50 });
+      for (let i = 0; i < 20; i++) {
+        const user = `fifty-user-${i}`;
+        const hash = await model.hashUserId(user);
+        const bucket = hash % 100;
+        const active = await model.isActiveForUser({
+          name: "percent-fifty-flag",
+          user,
+        });
+        expect(active).toBe(bucket < 50);
+      }
+    });
+
+    it("should reject percent 100 at validation time", async () => {
+      await expect(
+        model.create({ name: "percent-100-flag", percent: 100 }),
+      ).rejects.toThrow(InvalidFlagInputError);
+    });
+
+    it("should not change the result when everyone is set alongside percent", async () => {
+      await model.create({
+        name: "everyone-over-percent-flag",
+        everyone: false,
+        percent: 99.9,
+      });
+      const active = await model.isActiveForUser({
+        name: "everyone-over-percent-flag",
+        user: "any-user",
+      });
+      expect(active).toBe(false);
     });
   });
 
@@ -1029,7 +1261,7 @@ describe("FeatureFlagModel", () => {
       expect(isActive).toBe(true);
     });
 
-    it("should return false for expired flag when no handler is set", async () => {
+    it("should return true for expired flag when no handler is set and everyone is true", async () => {
       const pastDate = new Date();
       pastDate.setFullYear(pastDate.getFullYear() - 1); // One year in past
 
@@ -1044,8 +1276,47 @@ describe("FeatureFlagModel", () => {
         user: "user123",
       });
 
-      // Default behavior: expired flags are not active
-      expect(isActive).toBe(true); // Should continue with normal evaluation
+      // Expiry is signal only: everyone wins even for an expired flag
+      expect(isActive).toBe(true);
+    });
+
+    it("should return true for expired flag with role match when no handler is set", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 2);
+
+      await model.create({
+        name: "expired-role-flag-no-handler",
+        roles: ["admin"],
+        expires: pastDate,
+      });
+
+      const isActive = await model.isActiveForUser({
+        name: "expired-role-flag-no-handler",
+        user: "user123",
+        roles: ["admin"],
+      });
+
+      // Expiry is signal only: the role match still wins
+      expect(isActive).toBe(true);
+    });
+
+    it("should return true for expired flag in areActiveForUser when no handler is set and everyone is true", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 2);
+
+      await model.create({
+        name: "multi-expired-no-handler",
+        everyone: true,
+        expires: pastDate,
+      });
+
+      const results = await model.areActiveForUser({
+        names: ["multi-expired-no-handler"],
+        user: "user123",
+      });
+
+      // Expiry is signal only: everyone wins even for an expired flag
+      expect(results).toEqual({ "multi-expired-no-handler": true });
     });
 
     it("should keep everyone false as highest precedence over subjects", async () => {
@@ -1177,7 +1448,7 @@ describe("FeatureFlagModel", () => {
           expires: expect.any(Date),
         }),
       });
-      // Handler returned undefined, so normal evaluation continues
+      // Handler returned undefined, so no override — everyone wins even for an expired flag
       expect(isActive).toBe(true);
     });
 
@@ -1277,7 +1548,7 @@ describe("FeatureFlagModel", () => {
       expect(isActive).toBe(true); // Handler override
     });
 
-    it("should continue normal evaluation when handler returns undefined", async () => {
+    it("should fall through to normal rules when handler returns undefined", async () => {
       const pastDate = new Date();
       pastDate.setDate(pastDate.getDate() - 1); // Yesterday
 
@@ -1306,8 +1577,34 @@ describe("FeatureFlagModel", () => {
       });
 
       expect(onExpiredMock).toHaveBeenCalledTimes(2);
-      expect(isActiveForAdmin).toBe(true); // Matches role
-      expect(isActiveForUser).toBe(false); // Doesn't match role
+      expect(isActiveForAdmin).toBe(true); // Roles rescue an expired flag
+      expect(isActiveForUser).toBe(false);
+    });
+
+    it("should treat a null handler return as no override", async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 3);
+
+      const onExpiredMock = vi.fn().mockResolvedValue(null as any);
+
+      const modelWithHandler = new FeatureFlagModel(testPool, {
+        onExpired: onExpiredMock,
+      });
+
+      await modelWithHandler.create({
+        name: "expired-handler-returns-null",
+        everyone: true,
+        expires: pastDate,
+      });
+
+      const isActive = await modelWithHandler.isActiveForUser({
+        name: "expired-handler-returns-null",
+        user: "user123",
+      });
+
+      expect(onExpiredMock).toHaveBeenCalledTimes(1);
+      // Null is no override — everyone wins even for an expired flag
+      expect(isActive).toBe(true);
     });
 
     it("should use handler result for expired flag with percentage rollout", async () => {
@@ -1332,8 +1629,9 @@ describe("FeatureFlagModel", () => {
       });
 
       expect(onExpiredMock).toHaveBeenCalledTimes(1);
-      // Handler returned undefined, so percentage rollout is evaluated
-      expect(typeof isActive).toBe("boolean");
+      // Handler returned undefined, so no override — the rollout applies
+      // (user123 buckets to 11, which is < 50)
+      expect(isActive).toBe(true);
     });
 
     it("should handle expiration check at exact expiration time", async () => {
@@ -1393,7 +1691,7 @@ describe("FeatureFlagModel", () => {
       expect(metricsEmitted).toEqual([
         "expired_flag_used:expired-metrics-test",
       ]);
-      expect(isActive).toBe(true); // User is in the users list
+      expect(isActive).toBe(true); // The user match is honored despite expiry
     });
 
     it("should work correctly with multiple expired flags", async () => {
@@ -1434,8 +1732,8 @@ describe("FeatureFlagModel", () => {
 
       expect(onExpiredMock).toHaveBeenCalledTimes(2);
       expect(callLog).toEqual(["expired-flag-1", "expired-flag-2"]);
-      expect(isActive1).toBe(false); // Handler returned false
-      expect(isActive2).toBe(true); // Handler returned undefined, everyone is true
+      expect(isActive1).toBe(false); // Handler returned false — honored
+      expect(isActive2).toBe(true); // Handler returned undefined — everyone wins
     });
   });
 
@@ -1615,7 +1913,7 @@ describe("FeatureFlagModel", () => {
       expect(onExpiredMock).toHaveBeenCalledTimes(2);
       expect(results).toEqual({
         "multi-expired-override": true, // Handler override
-        "multi-expired-continue": true, // Handler undefined, role matches
+        "multi-expired-continue": true, // Handler undefined — role match wins
       });
     });
 
@@ -1746,7 +2044,7 @@ describe("FeatureFlagModel", () => {
 
       // Verify the results for our specific flags
       expect(results["all-expired-override"]).toBe(true); // Handler override
-      expect(results["all-expired-continue"]).toBe(true); // Handler undefined, role matches
+      expect(results["all-expired-continue"]).toBe(true); // Handler undefined — role match wins
       expect(results["all-not-expired"]).toBe(true); // Not expired, everyone true
     });
 
@@ -1796,6 +2094,34 @@ describe("FeatureFlagModel", () => {
       });
 
       expect(fromUser).toBe(fromContext);
+    });
+
+    it("should pass subjects through isActiveForUser", async () => {
+      const flag = await model.create({ name: "user-subjects-pass-through" });
+      await model.addSubject(flag.id, "tenant:for-user-api");
+
+      const enabled = await model.isActiveForUser({
+        name: "user-subjects-pass-through",
+        subjects: ["tenant:for-user-api"],
+      });
+
+      expect(enabled).toBe(true);
+    });
+
+    it("should pass subjects through areActiveForUser", async () => {
+      const on = await model.create({ name: "user-subjects-multi-on" });
+      await model.create({ name: "user-subjects-multi-off" });
+      await model.addSubject(on.id, "tenant:multi-user-api");
+
+      const results = await model.areActiveForUser({
+        names: ["user-subjects-multi-on", "user-subjects-multi-off"],
+        subjects: ["tenant:multi-user-api"],
+      });
+
+      expect(results).toEqual({
+        "user-subjects-multi-on": true,
+        "user-subjects-multi-off": false,
+      });
     });
 
     it("should check multiple flags with subjects", async () => {
@@ -1985,7 +2311,9 @@ describe("FeatureFlagGroupModel", () => {
     });
 
     try {
-      await setupPool.query(`DROP DATABASE IF EXISTS flapjack_group_test`);
+      await setupPool.query(
+        `DROP DATABASE IF EXISTS flapjack_group_test WITH (FORCE)`,
+      );
       await setupPool.query(`CREATE DATABASE flapjack_group_test`);
     } finally {
       await setupPool.end();
@@ -2013,7 +2341,9 @@ describe("FeatureFlagGroupModel", () => {
     });
 
     try {
-      await cleanupPool.query(`DROP DATABASE IF EXISTS flapjack_group_test`);
+      await cleanupPool.query(
+        `DROP DATABASE IF EXISTS flapjack_group_test WITH (FORCE)`,
+      );
     } finally {
       await cleanupPool.end();
     }

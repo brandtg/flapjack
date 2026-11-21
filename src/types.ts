@@ -8,7 +8,11 @@ export type FeatureFlag = {
   name: string;
   /** Flip this flag on or off for everyone, overriding all other settings */
   everyone?: boolean | null;
-  /** Number between 0 and 99.9 for percentage rollout */
+  /**
+   * Number between 0 and 99.9 for percentage rollout. Users are bucketed into
+   * integer buckets 0-99 (`hash % 100`), so 99.9 passes every bucket. For an
+   * explicit 100% rollout use `everyone: true` instead.
+   */
   percent?: number;
   /** List of roles that have this feature flag enabled */
   roles?: string[];
@@ -37,15 +41,16 @@ export type FeatureFlag = {
  * Called when a feature flag which has expired is used.
  *
  * If the handler returns `true` or `false`, that value will be used as the result of the feature
- * flag check. If it returns `undefined` the behavior will be the same as if the flag has not
- * expired. This can be used to implement a grace period for expired flags, or to emit metrics to
- * alert that an expired flag is still in use.
+ * flag check (e.g. a grace period after expiry). If it returns `undefined` or `null` (or no
+ * handler is set), the flag is evaluated normally — expiry never suppresses the normal rules
+ * (`everyone` wins even for an expired flag); it is purely signal, so the handler can emit
+ * metrics/alerts about the flag being used past its intended lifetime.
  */
 export type ExpiredFeatureFlagEventHandler = ({
   flag,
 }: {
   flag: FeatureFlag;
-}) => Promise<boolean | undefined>;
+}) => Promise<boolean | null | undefined>;
 
 /**
  * Event handlers for feature flag events.

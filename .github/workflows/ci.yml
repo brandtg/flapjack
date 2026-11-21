@@ -24,7 +24,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
         ports:
-          - 5432:5432
+          - 5477:5432
 
     strategy:
       matrix:
@@ -60,12 +60,12 @@ jobs:
       - name: Run tests
         run: npm test
         env:
-          DATABASE_URL: postgresql://flapjack:flapjack@localhost:5432/flapjack
+          DATABASE_URL: postgresql://flapjack:flapjack@localhost:5477/flapjack
 
       - name: Run smoke test
         run: npm run smoke
         env:
-          DATABASE_URL: postgresql://flapjack:flapjack@localhost:5432/flapjack
+          DATABASE_URL: postgresql://flapjack:flapjack@localhost:5477/flapjack
 
   package-check:
     name: Package Validation

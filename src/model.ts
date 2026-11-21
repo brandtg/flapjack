@@ -39,6 +39,90 @@ type UpdateChanges = Partial<
   Omit<FeatureFlag, "id" | "created" | "modified" | "archived">
 >;
 
+/**
+ * Thrown by `create`/`update` when the input is invalid (empty/whitespace
+ * name, out-of-range percent, or an invalid `expires` date). The message is
+ * meant to be shown to callers — friendly, not a raw Postgres exception.
+ */
+export class InvalidFlagInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidFlagInputError";
+  }
+}
+
+/**
+ * Validates a flag name: must be a non-empty string (after trimming).
+ * `null`/`undefined`/whitespace-only values are rejected.
+ */
+function validateName(name: unknown): void {
+  if (typeof name !== "string" || name.trim().length === 0) {
+    throw new InvalidFlagInputError(
+      "Feature flag name is required and cannot be empty",
+    );
+  }
+}
+
+/**
+ * Validates a percentage rollout value: must be a finite number between 0
+ * and 99.9. `null`/`undefined` are allowed (meaning "not set"). A percent of
+ * 0 is valid (no rollout); 100 is rejected — for a 100% rollout use
+ * `everyone: true`, which is the documented convention.
+ */
+function validatePercent(percent: unknown): void {
+  if (percent === undefined || percent === null) return;
+  if (
+    typeof percent !== "number" ||
+    !Number.isFinite(percent) ||
+    percent < 0 ||
+    percent > 99.9
+  ) {
+    throw new InvalidFlagInputError(
+      `percent must be a number between 0 and 99.9 (got ${typeof percent === "number" ? percent : JSON.stringify(percent)}); use everyone: true for a 100% rollout`,
+    );
+  }
+}
+
+/**
+ * Validates an expiration date: must be null/undefined (meaning "not set")
+ * or a valid date. An invalid date is rejected up front instead of failing
+ * later with a raw Postgres `22007` error. A date in the past is allowed —
+ * it simply means the flag is already expired.
+ */
+function validateExpires(expires: unknown): void {
+  if (expires === undefined || expires === null) return;
+  const date = expires instanceof Date ? expires : new Date(expires as any);
+  if (isNaN(date.getTime())) {
+    throw new InvalidFlagInputError(
+      `expires must be a valid date (got ${JSON.stringify(expires)})`,
+    );
+  }
+}
+
+/**
+ * Validates the shared name/percent/expires fields of a create/update call.
+ * `name` is always required (create: must be non-empty; update: when present
+ * must be non-empty — there is no clear-name path). `percent` and `expires`
+ * are optional; `null` means "clear" and is allowed, so only non-null
+ * values are checked.
+ */
+function validateFlagInput(
+  changes: { name?: unknown; percent?: unknown; expires?: unknown },
+  { requireName = false }: { requireName?: boolean } = {},
+): void {
+  if (requireName) {
+    validateName(changes.name);
+  } else if ("name" in changes && changes.name !== undefined) {
+    // An explicit `undefined` name means "not set" — skip validation and
+    // the assignment (same as omitting the key).
+    validateName(changes.name);
+  }
+  if ("percent" in changes && changes.percent !== undefined)
+    validatePercent(changes.percent);
+  if ("expires" in changes && changes.expires !== undefined)
+    validateExpires(changes.expires);
+}
+
 function mapRow(row: any): FeatureFlag {
   return {
     id: row.id,
@@ -77,6 +161,22 @@ function mapRow(row: any): FeatureFlag {
  * const featureFlags = new FeatureFlagModel(pool);
  * ```
  */
+/**
+ * Pure hash of a user ID using MurmurHash3 — the same algorithm used for
+ * percentage rollout bucketing. Does not touch the database.
+ *
+ * @param userId - The user ID to hash
+ * @returns The hash value used for percentage bucketing
+ *
+ * @remarks
+ * The bucket is computed as `hash % 100`, i.e. an integer 0-99. A percent of
+ * 99.9 therefore passes every bucket; for an explicit 100% rollout use
+ * `everyone: true` instead of `percent: 100` (which is rejected by the DB).
+ */
+export function hashUserId(userId: string): number {
+  return MurmurHash3(userId).result();
+}
+
 export class FeatureFlagModel {
   private db: Queryable;
   private eventHandlers?: FeatureFlagEventHandlers;
@@ -102,9 +202,12 @@ export class FeatureFlagModel {
    * Creates a new feature flag in the database.
    *
    * @param input - Feature flag configuration
+   * @remarks
+   * Passing `undefined` for an optional field is the same as omitting it — the
+   * column stays at its default/NULL. Passing `null` explicitly writes SQL NULL.
    * @param input.name - Unique name for the feature flag (required)
    * @param input.everyone - Optional boolean to enable/disable for everyone (overrides all other settings)
-   * @param input.percent - Optional percentage rollout (0-99.9)
+   * @param input.percent - Optional percentage rollout (0-99.9; for 100% use `everyone: true`)
    * @param input.roles - Optional list of roles that have this flag enabled
    * @param input.groups - Optional list of user groups that have this flag enabled
    * @param input.users - Optional list of specific user IDs that have this flag enabled
@@ -125,40 +228,30 @@ export class FeatureFlagModel {
    * ```
    */
   async create(input: CreateInput): Promise<FeatureFlag> {
+    validateFlagInput(input, { requireName: true });
     const cols: string[] = ["name"];
     const vals: any[] = [input.name];
 
-    if ("everyone" in input) {
-      cols.push("everyone");
-      vals.push(input.everyone ?? null);
-    }
-    if ("percent" in input) {
-      cols.push("percent");
-      vals.push(input.percent ?? null);
-    }
-    if ("roles" in input) {
-      cols.push("roles");
-      vals.push(input.roles ?? null);
-    }
-    if ("groups" in input) {
-      cols.push("groups");
-      vals.push(input.groups ?? null);
-    }
-    if ("users" in input) {
-      cols.push("users");
-      vals.push(input.users ?? null);
-    }
-    if ("tags" in input) {
-      cols.push("tags");
-      vals.push(input.tags ?? null);
-    }
-    if ("note" in input) {
-      cols.push("note");
-      vals.push(input.note ?? null);
-    }
-    if ("expires" in input) {
-      cols.push("expires");
-      vals.push(input.expires ?? null);
+    // Skip keys whose value is `undefined`: an explicit `undefined` means
+    // "not set" (same as omitting the key), not "clear" (which is `null`).
+    // `in` is used to distinguish a present-but-`undefined` key from an
+    // absent one — an absent key is skipped entirely; a present `null` is
+    // written as SQL NULL.
+    for (const key of [
+      "everyone",
+      "percent",
+      "roles",
+      "groups",
+      "users",
+      "tags",
+      "note",
+      "expires",
+    ] as const) {
+      if (!(key in input)) continue;
+      const value = input[key];
+      if (value === undefined) continue;
+      cols.push(key);
+      vals.push(value ?? null);
     }
 
     const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
@@ -319,6 +412,7 @@ export class FeatureFlagModel {
    * @remarks
    * The modified timestamp is automatically updated by a database trigger.
    * Pass `null` for a field to clear it (e.g., `everyone: null` removes the override).
+   * Passing `undefined` for a field leaves it unchanged (treated the same as omitting the key).
    * If no changes are provided, returns the flag unchanged.
    *
    * @example
@@ -337,44 +431,36 @@ export class FeatureFlagModel {
     id: number,
     changes: UpdateChanges,
   ): Promise<FeatureFlag | null> {
+    validateFlagInput(changes);
     const sets: string[] = [];
     const vals: any[] = [];
 
+    // Skip keys whose value is `undefined`: an explicit `undefined` means
+    // "not set" (same as omitting the key), not "clear" (which is `null`).
+    // `in` is used to distinguish a present-but-`undefined` key from an
+    // absent one — an absent key is skipped entirely; a present `null` is
+    // written as SQL NULL.
     if ("name" in changes) {
-      sets.push(`name = $${sets.length + 1}`);
-      vals.push(changes.name ?? null);
+      if (changes.name !== undefined) {
+        sets.push(`name = $${sets.length + 1}`);
+        vals.push(changes.name ?? null);
+      }
     }
-    if ("everyone" in changes) {
-      sets.push(`everyone = $${sets.length + 1}`);
-      vals.push(changes.everyone ?? null);
-    }
-    if ("percent" in changes) {
-      sets.push(`percent = $${sets.length + 1}`);
-      vals.push(changes.percent ?? null);
-    }
-    if ("roles" in changes) {
-      sets.push(`roles = $${sets.length + 1}`);
-      vals.push(changes.roles ?? null);
-    }
-    if ("groups" in changes) {
-      sets.push(`groups = $${sets.length + 1}`);
-      vals.push(changes.groups ?? null);
-    }
-    if ("users" in changes) {
-      sets.push(`users = $${sets.length + 1}`);
-      vals.push(changes.users ?? null);
-    }
-    if ("tags" in changes) {
-      sets.push(`tags = $${sets.length + 1}`);
-      vals.push(changes.tags ?? null);
-    }
-    if ("note" in changes) {
-      sets.push(`note = $${sets.length + 1}`);
-      vals.push(changes.note ?? null);
-    }
-    if ("expires" in changes) {
-      sets.push(`expires = $${sets.length + 1}`);
-      vals.push(changes.expires ?? null);
+    for (const key of [
+      "everyone",
+      "percent",
+      "roles",
+      "groups",
+      "users",
+      "tags",
+      "note",
+      "expires",
+    ] as const) {
+      if (!(key in changes)) continue;
+      const value = changes[key];
+      if (value === undefined) continue;
+      sets.push(`${key} = $${sets.length + 1}`);
+      vals.push(value ?? null);
     }
 
     if (sets.length === 0) {
@@ -539,8 +625,12 @@ export class FeatureFlagModel {
   /**
    * Evaluates a feature flag for a user based on flag configuration.
    * This is a stateless helper that performs the actual flag evaluation logic.
+   *
+   * @private Internal implementation detail — not part of the public surface.
+   * Callers should use the `isActiveForUser` / `isActiveForContext` /
+   * `areActiveForUser` / `areActiveForContext` methods instead.
    */
-  async evaluateFlagForUser(
+  private async evaluateFlagForUser(
     flag: FeatureFlag,
     {
       user,
@@ -597,6 +687,8 @@ export class FeatureFlagModel {
     }
 
     // Percentage Check: If percentage rollout applies to this user, return rollout result
+    // Users are bucketed into integer buckets 0-99 (`hash % 100`). A percent of
+    // 99.9 passes every bucket; for an explicit 100% rollout use `everyone: true`.
     if (user && flag.percent && flag.percent > 0) {
       const userHash = await this.hashUserId(user);
       const bucket = userHash % 100;
@@ -618,7 +710,9 @@ export class FeatureFlagModel {
    * @remarks
    * This method is useful for debugging percentage rollouts.
    * The hash value is consistent for the same user ID.
-   * The bucket is computed as `hash % 100`.
+   * The bucket is computed as `hash % 100`, i.e. an integer 0-99. A percent of
+   * 99.9 therefore passes every bucket; for an explicit 100% rollout use
+   * `everyone: true` instead of `percent: 100` (which is rejected by the DB).
    *
    * @example
    * ```typescript
@@ -629,7 +723,7 @@ export class FeatureFlagModel {
    * ```
    */
   async hashUserId(userId: string): Promise<number> {
-    return MurmurHash3(userId).result();
+    return hashUserId(userId);
   }
 
   /**
@@ -640,16 +734,24 @@ export class FeatureFlagModel {
    * @param params.user - Optional user ID
    * @param params.roles - Optional list of roles the user has
    * @param params.groups - Optional list of groups the user belongs to
+   * @param params.subjects - Optional list of external subject IDs the user carries (direct flag or flag-group match)
    * @returns true if the flag is active for the user, false otherwise
    *
    * @remarks
+   * If the flag is expired, the `onExpired` handler (if set) fires first and
+   * its boolean return (if any) is used as the result — e.g. a grace period.
+   * Otherwise (no handler, or the handler returns `undefined`/null) the flag
+   * falls through to the normal rules below — expiry never suppresses them,
+   * so `everyone: true` wins even for an expired flag.
+   *
    * Evaluation order (first match wins):
    * 1. Everyone override (if set to true/false, returns immediately)
    * 2. User ID is in the users list
-   * 3. User belongs to any group in the groups list
-   * 4. User has any role in the roles list
-   * 5. User falls within the percentage rollout (based on consistent hashing)
-   * 6. Default: returns false
+   * 3. User has any subject in the subjects list (direct flag or flag-group match)
+   * 4. User belongs to any group in the groups list
+   * 5. User has any role in the roles list
+   * 6. User falls within the percentage rollout (based on consistent hashing)
+   * 7. Default: returns false
    *
    * @example
    * ```typescript
@@ -673,18 +775,39 @@ export class FeatureFlagModel {
     user,
     roles,
     groups,
+    subjects,
   }: {
     name: string;
     user?: string;
     roles?: string[];
     groups?: string[];
+    subjects?: string[];
   }): Promise<boolean> {
     return this.isActiveForContext({
       name,
       user,
       roles,
       groups,
+      subjects,
     });
+  }
+
+  /**
+   * Fires the `onExpired` handler for a flag that has expired.
+   *
+   * Returns the handler's boolean result if it provided one (`true`/`false`);
+   * otherwise returns `undefined` (meaning "no override" — the caller falls
+   * through to the normal evaluation rules). Does nothing for non-expired
+   * flags or when no handler is set.
+   *
+   * Exported so the cache layer can fire the same handler on every evaluation
+   * (including cache hits) instead of only on cache misses.
+   */
+  async fireExpiredHandler(flag: FeatureFlag): Promise<boolean | undefined> {
+    if (!flag.expires || flag.expires > new Date()) return undefined;
+    if (!this.eventHandlers?.onExpired) return undefined;
+    const result = await this.eventHandlers.onExpired({ flag });
+    return result ?? undefined;
   }
 
   /**
@@ -710,17 +833,15 @@ export class FeatureFlagModel {
       return false;
     }
 
-    // If the flag has expired, trigger event and return false
-    if (
-      this.eventHandlers?.onExpired &&
-      flag &&
-      flag.expires &&
-      flag.expires <= new Date()
-    ) {
-      const expiredResult = await this.eventHandlers.onExpired({ flag });
-      if (expiredResult !== undefined) {
-        return expiredResult;
-      }
+    // Expired flag: trigger onExpired (if set). A boolean the handler returns
+    // is honored as the result (e.g. a grace period); an `undefined`/null
+    // return means "no override" and the flag falls through to the normal
+    // evaluation rules — expiry never suppresses those (in particular,
+    // `everyone: true` wins even when the flag has expired). Expiry is signal:
+    // it exists so the handler fires and can emit metrics/alerts.
+    const expiredOverride = await this.fireExpiredHandler(flag);
+    if (expiredOverride !== undefined) {
+      return expiredOverride;
     }
 
     const subjectMatchedFlagIds = await this.getSubjectMatchedFlagIds(subjects);
@@ -741,19 +862,27 @@ export class FeatureFlagModel {
    * @param params.user - Optional user ID
    * @param params.roles - Optional list of roles the user has
    * @param params.groups - Optional list of groups the user belongs to
+   * @param params.subjects - Optional list of external subject IDs the user carries (direct flag or flag-group match)
    * @returns Record mapping flag names to their active status (true/false)
    *
    * @remarks
    * This method fetches all flags in a single query for efficiency.
    * If names is provided, only those flags are checked. Non-existent flags are marked as false.
    * If names is not provided, all flags in the database are checked.
+   * If the flag is expired, the `onExpired` handler (if set) fires first and
+   * its boolean return (if any) is used as the result — e.g. a grace period.
+   * Otherwise (no handler, or the handler returns `undefined`/null) the flag
+   * falls through to the normal rules below — expiry never suppresses them,
+   * so `everyone: true` wins even for an expired flag.
+   *
    * Evaluation order for each flag (first match wins):
    * 1. Everyone override (if set to true/false, returns immediately)
    * 2. User ID is in the users list
-   * 3. User belongs to any group in the groups list
-   * 4. User has any role in the roles list
-   * 5. User falls within the percentage rollout (based on consistent hashing)
-   * 6. Default: returns false
+   * 3. User has any subject in the subjects list (direct flag or flag-group match)
+   * 4. User belongs to any group in the groups list
+   * 5. User has any role in the roles list
+   * 6. User falls within the percentage rollout (based on consistent hashing)
+   * 7. Default: returns false
    *
    * @example
    * ```typescript
@@ -785,17 +914,20 @@ export class FeatureFlagModel {
     user,
     roles,
     groups,
+    subjects,
   }: {
     names?: string[];
     user?: string;
     roles?: string[];
     groups?: string[];
+    subjects?: string[];
   }): Promise<Record<string, boolean>> {
     return this.areActiveForContext({
       names,
       user,
       roles,
       groups,
+      subjects,
     });
   }
 
@@ -840,17 +972,16 @@ export class FeatureFlagModel {
         continue;
       }
 
-      // If the flag has expired, trigger event
-      if (
-        this.eventHandlers?.onExpired &&
-        flag.expires &&
-        flag.expires <= new Date()
-      ) {
-        const expiredResult = await this.eventHandlers.onExpired({ flag });
-        if (expiredResult !== undefined) {
-          result[name] = expiredResult;
-          continue;
-        }
+      // Expired flag: trigger onExpired (if set). A boolean the handler returns
+      // is honored as the result (e.g. a grace period); an `undefined`/null
+      // return means "no override" and the flag falls through to the normal
+      // evaluation rules — expiry never suppresses those (in particular,
+      // `everyone: true` wins even when the flag has expired). Expiry is signal:
+      // it exists so the handler fires and can emit metrics/alerts.
+      const expiredOverride = await this.fireExpiredHandler(flag);
+      if (expiredOverride !== undefined) {
+        result[name] = expiredOverride;
+        continue;
       }
 
       result[name] = await this.evaluateFlagForUser(flag, {

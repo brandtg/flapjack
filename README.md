@@ -14,7 +14,8 @@ A simple feature flags library with PostgreSQL integration, inspired by [django-
 - **PostgreSQL-backed**: Reliable, transactional flag storage with your existing database
 - **CLI included**: Manage feature flags from the command line
 - **TypeScript-first**: Full type safety with comprehensive TypeScript definitions
-- **Battle-tested**: Comprehensive test suite with 31+ tests
+- **Battle-tested**: Comprehensive test suite with 229 tests
+- **Time-limited flags**: Expiration dates with an `onExpired` event handler (grace period / metrics)
 
 ## Requirements
 
@@ -56,6 +57,8 @@ const featureFlags = new FeatureFlagModel(pool);
 // N.b. use a meaningful naming scheme like <feature>_<date>_<owner>
 const flag = await featureFlags.create({
   name: "enable_new_checkout_20250101_gbrandt",
+  // Optional: time-limit the flag (ISO date; evaluated must pass to stay active)
+  // expires: new Date("2026-12-31T00:00:00Z"),
 });
 
 // Check if a feature flag is active for a user
@@ -111,11 +114,13 @@ When checking if a feature flag is active for a user, Flapjack evaluates rules i
 
 1. **Everyone Override** (`everyone: true/false`): If set, immediately returns this value, ignoring all other rules
 2. **User List** (`users: [...]`): If the user ID is in this list, returns `true`
-3. **Group Membership** (`groups: [...]`): If the user belongs to any specified group, returns `true`
-4. **External Subject Match** (`subjects: [...]`): If any provided subject matches a direct flag subject or a flag-group subject, returns `true`
+3. **External Subject Match** (`subjects: [...]`): If any provided subject matches a direct flag subject or a flag-group subject, returns `true`
+4. **Group Membership** (`groups: [...]`): If the user belongs to any specified group, returns `true`
 5. **Role Membership** (`roles: [...]`): If the user has any specified role, returns `true`
-6. **Percentage Rollout** (`percent: 0-99.9`): Uses consistent hashing to deterministically bucket users
+6. **Percentage Rollout** (`percent: 0-99.9`): Uses consistent hashing to deterministically bucket users (integer buckets 0-99; 99.9 passes every bucket — for an explicit 100% rollout use `everyone: true`)
 7. **Default**: Returns `false` if no conditions are met
+
+`expires` does not participate in this order. An expired flag is still evaluated under the rules above — `everyone` wins even for an expired flag — but the `onExpired` handler (if set) fires first and, if it returns `true`/`false`, that value is used as the result instead. See [Expiration and `onExpired` Handlers](#expiration-and-onexpired-handlers).
 
 ## External Subject Targeting
 
@@ -181,6 +186,48 @@ await featureFlags.isActiveForUser({
 });
 ```
 
+## Expiration and `onExpired` Handlers
+
+A flag can carry an `expires` date. Expiry is **signal, not a hard stop**: when an expired flag is evaluated, the evaluation proceeds under the normal rules (everyone -> users -> subjects -> groups -> roles -> percent -> default), so `everyone: true` wins even when the flag has expired. The `expires` date exists so the `onExpired` handler fires — giving you metrics/alerts when a flag used past its intended lifetime.
+
+You can attach an `onExpired` event handler to the model (or cached wrapper). The handler fires whenever an expired flag is evaluated; if it returns a `true`/`false`, that value is used as the result (e.g. a grace period after expiry). If it returns `undefined`/`null` (or no handler is set), the flag falls through to the normal evaluation rules.
+
+```typescript
+import { FeatureFlagModel } from "@brandtg/flapjack";
+
+const flagModel = new FeatureFlagModel(pool, {
+  onExpired: async ({ flag }) => {
+    // e.g. emit a usage metric / alert that an expired flag is still in use
+    await metrics.record("flag.expired_used", { flag: flag.name });
+    // return true to keep the flag active for a short grace period after expiry
+    return (
+      flag.expires && flag.expires > new Date(Date.now() - 24 * 60 * 60 * 1000)
+    );
+  },
+});
+
+// Create a flag that expires in 7 days
+await flagModel.create({
+  name: "temporary_experiment",
+  expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+});
+
+// Update an existing flag to expire in 24 hours
+await flagModel.update(flagId, {
+  expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+});
+```
+
+The CLI also supports `--expires` (ISO 8601) on `create` and `update`, and `--clear-expires` on `update` to remove the expiration date:
+
+```bash
+flapjack create --name temporary_experiment --expires 2026-12-01T00:00:00Z
+flapjack update 1 --expires 2026-12-01T00:00:00Z
+flapjack update 1 --clear-expires
+```
+
+In the cached path, the wrapper stores the flag's expiry alongside its cached boolean and re-fires `onExpired` on every evaluation of a flag whose stored expiry has passed — so side effects keep firing even for cached results.
+
 ## Organizing Flags with Tags
 
 Tags are freeform labels for organizing flags without encoding that information in
@@ -217,7 +264,7 @@ flapjack update <id> --clear-tags
 
 ### Built-in Caching Layer
 
-Flapjack includes a high-performance caching layer with TTL support:
+Flapjack includes a high-performance caching layer with TTL support. The built-in `InMemoryCache` is additionally bounded: at most `maxSize` entries (default `10_000`, via `new InMemoryCache({ maxSize })`) are held before the least-recently-used entries are evicted (with expired entries dropped first). A long-running process can therefore hold at most that many entries, and you can raise or lower the bound to match your workload.
 
 ```typescript
 import { Pool } from "pg";
@@ -225,6 +272,7 @@ import {
   FeatureFlagModel,
   FeatureFlagCache,
   InMemoryCache,
+  type CachedFlagResult,
 } from "@brandtg/flapjack";
 
 // Set up the database model
@@ -233,7 +281,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // Create cached feature flags instance
 const featureFlags = new FeatureFlagCache({
   model: new FeatureFlagModel(pool),
-  cache: new InMemoryCache<boolean>(),
+  cache: new InMemoryCache<CachedFlagResult>({ maxSize: 10_000 }), // result + expiry; 10k-entry LRU bound
   ttl: 300, // Set TTL to 5 minutes (300 seconds)
 });
 
@@ -270,21 +318,21 @@ await featureFlags.isActiveForUser({
 You can implement your own cache (Redis, Memcached, etc.) by implementing the `Cache` interface:
 
 ```typescript
-import type { Cache } from "@brandtg/flapjack";
+import type { Cache, CachedFlagResult } from "@brandtg/flapjack";
 
-class RedisCache implements Cache {
+class RedisCache implements Cache<CachedFlagResult> {
   private redis: RedisClient;
 
   constructor(redis: RedisClient) {
     this.redis = redis;
   }
 
-  get(key: string): any {
+  get(key: string): Promise<CachedFlagResult | undefined> {
     const value = this.redis.get(key);
     return value ? JSON.parse(value) : undefined;
   }
 
-  set(key: string, value: any, ttl?: number): void {
+  set(key: string, value: CachedFlagResult, ttl?: number): Promise<void> {
     const serialized = JSON.stringify(value);
     if (ttl) {
       this.redis.setex(key, ttl, serialized);
@@ -293,7 +341,7 @@ class RedisCache implements Cache {
     }
   }
 
-  delete(key: string): void {
+  delete(key: string): Promise<void> {
     this.redis.del(key);
   }
 }
@@ -305,6 +353,8 @@ const featureFlags = new FeatureFlagCache({
   ttl: 300,
 });
 ```
+
+> **Note on cache entries:** a cached entry stores the boolean result **and** the flag's expiry (epoch milliseconds) — not the whole flag. On a cache hit, if the stored expiry says the flag may be expired, the cache layer fetches the flag fresh and fires `onExpired` with it — so side effects like usage metrics keep firing for expired flags without a database round trip on the non-expired path. A flag modified within the TTL keeps serving its cached result until the TTL expires.
 
 ### Database Connection Pooling
 
@@ -349,20 +399,25 @@ const isInExperiment = await featureFlags.isActiveForUser({
   user: "user_123",
 });
 
-// Gradual rollout: Start at 5%, increase to 100% over time
+// Gradual rollout: start at 5%, increase over time
 await featureFlags.update(flagId, { percent: 5 });
 // ... monitor metrics ...
 await featureFlags.update(flagId, { percent: 25 });
 // ... monitor metrics ...
-await featureFlags.update(flagId, { percent: 100 });
+await featureFlags.update(flagId, { percent: 50 });
+// ... monitor metrics ...
+// Reach the end of the percentage path: for a true 100% rollout use everyone: true
+// (percent: 100 is rejected by the database constraint — 99.9 is the effective max)
+await featureFlags.update(flagId, { everyone: true });
 ```
 
 ### How User Bucketing Works
 
 - Uses **MurmurHash3** for consistent, deterministic hashing
-- Same user ID always maps to the same bucket (0-99)
+- Same user ID always maps to the same bucket (integer buckets 0-99, `hash % 100`)
 - Changing the user ID will change bucket assignment
 - Distribution is uniform across the user base
+- A `percent` of 99.9 passes every bucket; for an explicit 100% rollout, use `everyone: true` (`percent: 100` is rejected by the database constraint)
 
 ## API Reference
 
@@ -370,7 +425,7 @@ await featureFlags.update(flagId, { percent: 100 });
 
 #### `create(input: CreateInput): Promise<FeatureFlag>`
 
-Creates a new feature flag.
+Creates a new feature flag. Passing `undefined` for an optional field leaves it unset (same as omitting the key); passing `null` explicitly writes SQL NULL.
 
 #### `getById(id: number, options?: { includeArchived?: boolean }): Promise<FeatureFlag | null>`
 
@@ -390,7 +445,7 @@ Lists all feature flags carrying the given tag (exact match), ordered by ID. Arc
 
 #### `update(id: number, changes: UpdateChanges): Promise<FeatureFlag | null>`
 
-Updates a feature flag. Returns the updated flag or null if not found.
+Updates a feature flag. Returns the updated flag or null if not found. Passing `undefined` for a field leaves it unchanged (same as omitting the key); passing `null` clears it.
 
 #### `delete(id: number): Promise<boolean>`
 
@@ -402,13 +457,76 @@ Archives (hides) a feature flag while keeping the row for historical/audit purpo
 
 Archiving is **irreversible** (there is no `unarchive`) and the `archived` timestamp is immutable once set. The flag's name stays reserved permanently — a new flag cannot reuse it; create a new flag with a different name instead. The same `archive(id)` / `includeArchived` semantics apply to `FeatureFlagGroupModel`.
 
+#### `InvalidFlagInputError`
+
+Exported from the package root (`import { InvalidFlagInputError } from "@brandtg/flapjack"`). Thrown by `create`/`update` when input is invalid — empty name (after trim), percent outside 0–99.9, or an unparseable `expires` date. The message is friendly and meant to be shown to callers; catch it to show a validation error rather than a raw Postgres exception.
+
+#### `FeatureFlagModel(db, eventHandlers?)` — event handlers
+
+Construct with an optional `FeatureFlagEventHandlers` object. The `onExpired` handler is called whenever an expired flag is evaluated; see [Expiration and `onExpired` Handlers](#expiration-and-onexpired-handlers).
+
+`FeatureFlagEventHandlers` has one handler:
+
+- `onExpired?: ExpiredFeatureFlagEventHandler` — `({ flag }: { flag: FeatureFlag }) => Promise<boolean | undefined>`. Called for any expired flag. Return `true`/`false` to force the result (grace period / hard stop); return `undefined`/`null` (or set no handler) and the flag falls through to the normal evaluation rules. Exported from the package root as `ExpiredFeatureFlagEventHandler` (type-only).
+
+```typescript
+import { FeatureFlagModel } from "@brandtg/flapjack";
+import type { FeatureFlagEventHandlers } from "@brandtg/flapjack";
+
+const model = new FeatureFlagModel(pool, {
+  onExpired: async ({ flag }) => {
+    /* return true/false/undefined */
+  },
+});
+```
+
+#### `isActiveForContext(params): Promise<boolean>`
+
+Checks if a feature flag is active for a context (user + external subjects). Accepts `user`, `roles`, `groups` and `subjects` (external subject IDs — direct flag or flag-group match).
+
+#### `areActiveForUser(params): Promise<Record<string, boolean>>`
+
+Checks multiple flags (or all of them if `names` is omitted) for a user. Accepts `user`, `roles`, `groups` and `subjects`.
+
+#### `areActiveForContext(params): Promise<Record<string, boolean>>`
+
+Checks multiple flags (or all of them if `names` is omitted) for a context. Accepts `user`, `roles`, `groups` and `subjects`.
+
+#### `getManyByName(names: string[], options?): Promise<FeatureFlag[]>`
+
+Retrieves multiple feature flags by name (may be shorter than the input if some names don't exist).
+
+#### `getMany(ids: number[], options?): Promise<FeatureFlag[]>`
+
+Retrieves multiple feature flags by ID (may be shorter than the input if some IDs don't exist).
+
+#### `getFeatureFlagsForSubject(subject: string, options?): Promise<FeatureFlag[]>`
+
+Gets all feature flags directly associated with an external subject identifier.
+
+#### `getSubjects(id: number): Promise<string[]>`
+
+Returns all external subject identifiers attached to a feature flag.
+
+#### `getLastModified(): Promise<number>`
+
+Returns the latest `modified` timestamp across all feature flags, in milliseconds since epoch. Returns -1 if the table is empty.
+
+#### `updateAll(groupId: number, changes): Promise<number>`
+
+Updates all feature flags in a group with the same changes (only `everyone`, `percent`, `roles`, `groups`, `users` are allowed). Returns the number of flags updated.
+
+#### `getGroupsForSubject(subject: string, options?): Promise<FeatureFlagGroup[]>`
+
+Returns all feature flag groups directly associated with an external subject identifier.
+
 #### `isActiveForUser(params): Promise<boolean>`
 
-Checks if a feature flag is active for a user based on the evaluation rules.
+Checks if a feature flag is active for a user based on the evaluation rules. Accepts the same `subjects` parameter as `isActiveForContext` (external subjects) and forwards it.
 
-#### `hashUserId(userId: string): Promise<number>`
+#### `hashUserId(userId: string): number` (pure helper) / `FeatureFlagModel.hashUserId(userId: string): Promise<number>`
 
-Returns the hash value used for percentage bucketing. Useful for debugging rollout distributions.
+Pure, database-free helper that returns the hash value used for percentage bucketing. Exported from the package root (`import { hashUserId } from "@brandtg/flapjack"`); `FeatureFlagModel.hashUserId` is a thin async wrapper kept for existing callers. Useful for debugging rollout distributions.
 
 ## CLI Usage
 
@@ -420,6 +538,9 @@ export DATABASE_URL="postgresql://user:pass@localhost/dbname"
 
 # Create a flag
 flapjack create --name my_feature --roles admin --note "Admin-only feature"
+
+# Create a flag with an expiration date
+flapjack create --name temporary --expires 2026-12-01T00:00:00Z
 
 # List all flags
 flapjack list
@@ -440,6 +561,10 @@ flapjack is-active my_feature --user user123 --roles admin
 # Check if multiple flags are active for a user
 flapjack are-active --names my_feature other_feature --user user123 --roles admin
 
+# Pass external subjects to the User commands (same as is-active-context/are-active-context)
+flapjack is-active my_feature --subjects tenant:acme
+flapjack are-active --names my_feature other_feature --subjects tenant:acme
+
 # Check if active for context (with external subject IDs)
 flapjack is-active-context my_feature --user user123 --subjects tenant:acme
 
@@ -451,6 +576,10 @@ flapjack update 1 --percent 50 --everyone false
 
 # Clear specific fields
 flapjack update 1 --clear-roles --clear-percent
+
+# Set / clear an expiration date
+flapjack update 1 --expires 2026-12-01T00:00:00Z
+flapjack update 1 --clear-expires
 
 # Delete a flag (permanent — destroys all metadata)
 flapjack delete 1
@@ -488,7 +617,7 @@ flapjack group-remove-subject 1 tenant:acme
 flapjack group-list-subjects 1
 flapjack group-list-by-subject tenant:acme
 
-# Debug user bucketing
+# Debug user bucketing (pure — works without a database)
 flapjack hash-user user123
 ```
 
@@ -514,7 +643,7 @@ Always roll out features gradually:
 
 1. Start with internal users/roles (e.g., `roles: ["admin", "staff"]`)
 2. Expand to beta testers (e.g., `groups: ["beta_testers"]`)
-3. Percentage rollout (5% → 25% → 50% → 100%)
+3. Percentage rollout (5% → 25% → 50% → 99.9%)
 4. Enable for everyone (e.g., `everyone: true`)
 5. After stable, remove the flag from code and database
 
@@ -547,6 +676,23 @@ await featureFlags.update(flagId, { everyone: true });
 await featureFlags.archive(flagId);
 // (archive is irreversible and the name stays reserved permanently)
 ```
+
+### Expiration and Grace Periods
+
+Flags can carry an `expires` date. Expiry is **signal, not a hard stop**: an expired flag is still evaluated under the normal rules (`everyone: true` wins even for an expired flag). Attach an `onExpired` handler to the model to (a) emit metrics/alerts when an expired flag is still in use and (b) opt into a grace period by returning a boolean from the handler:
+
+```typescript
+const flagModel = new FeatureFlagModel(pool, {
+  onExpired: async ({ flag }) => {
+    // fire metrics/alert; return true for a short grace period after expiry
+    return (
+      flag.expires && flag.expires > new Date(Date.now() - 24 * 60 * 60 * 1000)
+    );
+  },
+});
+```
+
+Clear the expiration date with `model.update(id, { expires: null })` or `flapjack update 1 --clear-expires`.
 
 ### Error Handling
 
@@ -595,7 +741,7 @@ try {
 If `isActiveForUser()` returns false unexpectedly:
 
 1. Verify the flag exists: `flapjack get-by-name your_flag_name`
-2. Check the evaluation rules with `flapjack is-active`
+2. Check the evaluation rules with `flapjack is-active` (evaluation order: everyone -> users -> subjects -> groups -> roles -> percent -> default)
 3. Verify user/role/group matching is case-sensitive
 
 ### Percentage Rollout Not Working
@@ -603,7 +749,7 @@ If `isActiveForUser()` returns false unexpectedly:
 Debug user bucketing:
 
 ```bash
-# Check which bucket a user falls into
+# Check which bucket a user falls into (pure — works without a database)
 flapjack hash-user user_123
 # Output: { userId: "user_123", hash: 1234567, bucket: 67 }
 
@@ -621,16 +767,17 @@ Install dependencies
 npm install
 ```
 
-Create an environment file:
+Create an environment file (the script writes `DATABASE_URL=postgres://flapjack:flapjack@localhost:5477/flapjack_dev` to `.env` — or copy the committed `.env.example` yourself):
 
 ```bash
 npm run dev:env
 ```
 
-Start the PostgreSQL database:
+Start the PostgreSQL database. The dev stack publishes host port `5477` by default; override with `FLAPJACK_PORT` if 5477 is taken:
 
 ```bash
 npm run dev:docker:up
+# or: FLAPJACK_PORT=5540 npm run dev:docker:up
 ```
 
 Run database migrations:
@@ -644,6 +791,8 @@ npm run dev:migrate
 ```bash
 npm run test
 ```
+
+The test suite drops and recreates `flapjack_test` / `flapjack_cli_test` databases, so it never reads `DATABASE_URL`. It connects to the dev DB at `localhost:${FLAPJACK_TEST_PORT:-5477}` (the same port `docker-compose.yml` publishes). If you run the stack on a non-default port, set `FLAPJACK_TEST_PORT` accordingly — e.g. `FLAPJACK_TEST_PORT=5540 npm test`.
 
 ### Database Management
 
