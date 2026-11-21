@@ -3,7 +3,7 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import { Pool } from "pg";
-import { FeatureFlagModel, FeatureFlagGroupModel } from "./model.js";
+import { FeatureFlagModel, FeatureFlagGroupModel, hashUserId } from "./model.js";
 import dotenv from "dotenv";
 
 dotenv.config({ quiet: true });
@@ -1477,30 +1477,21 @@ cli.command(
     });
   },
   async (argv) => {
-    const db = createDatabase();
-    const model = new FeatureFlagModel(db);
-
-    try {
-      const hash = await model.hashUserId(argv.userId!);
-      const bucket = hash % 100;
-      // bucket is an integer 0-99; percent 99.9 passes every bucket.
-      console.log(
-        JSON.stringify(
-          {
-            userId: argv.userId,
-            hash,
-            bucket,
-          },
-          null,
-          2,
-        ),
-      );
-    } catch (error) {
-      console.error("Error hashing user ID:", error);
-      process.exit(1);
-    } finally {
-      await db.end();
-    }
+    // hash-user is a pure helper — no database pool is needed.
+    const hash = hashUserId(argv.userId!);
+    const bucket = hash % 100;
+    // bucket is an integer 0-99; percent 99.9 passes every bucket.
+    console.log(
+      JSON.stringify(
+        {
+          userId: argv.userId,
+          hash,
+          bucket,
+        },
+        null,
+        2,
+      ),
+    );
   },
 );
 

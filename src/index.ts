@@ -1,5 +1,5 @@
 export type { FeatureFlag, FeatureFlagGroup } from "./types.js";
-export { FeatureFlagModel, FeatureFlagGroupModel } from "./model.js";
+export { FeatureFlagModel, FeatureFlagGroupModel, hashUserId } from "./model.js";
 export {
   FeatureFlagCache,
   InMemoryCache,

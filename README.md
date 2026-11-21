@@ -414,9 +414,9 @@ Archiving is **irreversible** (there is no `unarchive`) and the `archived` times
 
 Checks if a feature flag is active for a user based on the evaluation rules. Accepts the same `subjects` parameter as `isActiveForContext` (external subjects) and forwards it.
 
-#### `hashUserId(userId: string): Promise<number>`
+#### `hashUserId(userId: string): number` (pure helper) / `FeatureFlagModel.hashUserId(userId: string): Promise<number>`
 
-Returns the hash value used for percentage bucketing. Useful for debugging rollout distributions.
+Pure, database-free helper that returns the hash value used for percentage bucketing. Exported from the package root (`import { hashUserId } from "@brandtg/flapjack"`); `FeatureFlagModel.hashUserId` is a thin async wrapper kept for existing callers. Useful for debugging rollout distributions.
 
 ## CLI Usage
 
@@ -500,7 +500,7 @@ flapjack group-remove-subject 1 tenant:acme
 flapjack group-list-subjects 1
 flapjack group-list-by-subject tenant:acme
 
-# Debug user bucketing
+# Debug user bucketing (pure — works without a database)
 flapjack hash-user user123
 ```
 
@@ -615,7 +615,7 @@ If `isActiveForUser()` returns false unexpectedly:
 Debug user bucketing:
 
 ```bash
-# Check which bucket a user falls into
+# Check which bucket a user falls into (pure — works without a database)
 flapjack hash-user user_123
 # Output: { userId: "user_123", hash: 1234567, bucket: 67 }
 

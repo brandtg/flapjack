@@ -77,6 +77,22 @@ function mapRow(row: any): FeatureFlag {
  * const featureFlags = new FeatureFlagModel(pool);
  * ```
  */
+/**
+ * Pure hash of a user ID using MurmurHash3 — the same algorithm used for
+ * percentage rollout bucketing. Does not touch the database.
+ *
+ * @param userId - The user ID to hash
+ * @returns The hash value used for percentage bucketing
+ *
+ * @remarks
+ * The bucket is computed as `hash % 100`, i.e. an integer 0-99. A percent of
+ * 99.9 therefore passes every bucket; for an explicit 100% rollout use
+ * `everyone: true` instead of `percent: 100` (which is rejected by the DB).
+ */
+export function hashUserId(userId: string): number {
+  return MurmurHash3(userId).result();
+}
+
 export class FeatureFlagModel {
   private db: Queryable;
   private eventHandlers?: FeatureFlagEventHandlers;
@@ -633,7 +649,7 @@ export class FeatureFlagModel {
    * ```
    */
   async hashUserId(userId: string): Promise<number> {
-    return MurmurHash3(userId).result();
+    return hashUserId(userId);
   }
 
   /**

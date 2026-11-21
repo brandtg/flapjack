@@ -70,6 +70,17 @@ describe("CLI smoke", () => {
     }
   });
 
+  it("hash-user works with no database", async () => {
+    const res = await runCli(["hash-user", "no-db-user"], {
+      DATABASE_URL: "",
+    });
+    expect(res.code).toBe(0);
+    const payload = JSON.parse(res.stdout.trim());
+    expect(payload.userId).toBe("no-db-user");
+    expect(typeof payload.hash).toBe("number");
+    expect(payload.bucket).toBe(payload.hash % 100);
+  });
+
   it("prints help", async () => {
     const res = await runCli(["--help"], { DATABASE_URL: TEST_DB_URL });
     expect(res.code).toBe(0);

@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { Pool } from "pg";
-import { FeatureFlagModel, FeatureFlagGroupModel } from "./model.js";
+import { FeatureFlagModel, FeatureFlagGroupModel, hashUserId } from "./model.js";
 import { runMigrations } from "./migrate.js";
 
 const DB_CONFIG = {
@@ -634,6 +634,17 @@ describe("FeatureFlagModel", () => {
 
       const latest = await model.getLastModified();
       expect(latest).toBe(expectedLatest);
+    });
+  });
+
+  describe("hashUserId pure helper", () => {
+    it("should return the same hash as the model method", async () => {
+      const modelHash = await model.hashUserId("helper-check");
+      expect(hashUserId("helper-check")).toBe(modelHash);
+    });
+
+    it("should not require a database", () => {
+      expect(typeof hashUserId("no-db")).toBe("number");
     });
   });
 
